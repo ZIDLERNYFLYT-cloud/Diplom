@@ -355,7 +355,7 @@ Transform:
   m_GameObject: {fileID: 106500524}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -6.02, y: 1.28, z: -7.64}
+  m_LocalPosition: {x: -6.02, y: 1.28, z: -34.26}
   m_LocalScale: {x: 38.224934, y: 1, z: 36.04117}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -942,6 +942,7 @@ MonoBehaviour:
     m_Bits: 64
   groundCheck: {fileID: 272693235}
   groundCheckRadius: 0.1
+  footstepScript: {fileID: 2024768959}
 --- !u!136 &2024768955
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -1026,7 +1027,13 @@ Animator:
   m_ApplyRootMotion: 0
   m_LinearVelocityBlending: 0
   m_StabilizeFeet: 0
-  m_WarningMessage: 
+  m_WarningMessage: "\nBinding warning: Some generic clip(s) animate transforms that
+    are already bound by a Humanoid avatar. These transforms can only be changed
+    by Humanoid clips.\n\tTransform 'mixamorig:Hips'\n\tTransform 'mixamorig:LeftFoot'\n\tTransform
+    'mixamorig:LeftHandThumb2'\n\tTransform 'mixamorig:LeftHandIndex1'\n\tTransform
+    'mixamorig:RightHandRing2'\n\tTransform 'mixamorig:Spine1'\n\tTransform 'mixamorig:RightArm'\n\tTransform
+    'mixamorig:LeftLeg'\n\tTransform 'mixamorig:LeftShoulder'\n\tTransform 'mixamorig:RightHandRing1'\n\tand
+    more ...\n\tFrom animation clip 'fall.com'"
   m_HasTransformHierarchy: 1
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
@@ -1047,9 +1054,12 @@ MonoBehaviour:
   footstepSounds:
   - {fileID: 8300000, guid: f0847140f47ed634ab4bc19edc37310c, type: 3}
   jumpSound: {fileID: 8300000, guid: 528e84612c465ae4f9f9b285ed77cc41, type: 3}
+  landSound: {fileID: 8300000, guid: 528e84612c465ae4f9f9b285ed77cc41, type: 3}
+  takeoffSound: {fileID: 8300000, guid: db4512a5f2f5ea94988a26eab6d4b9a9, type: 3}
   volume: 0.118
   pitchRange: 0.1
-  volumejump: 0.579
+  volumeJump: 0.167
+  volumeTakeoff: 0.623
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

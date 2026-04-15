@@ -4,52 +4,53 @@ public class CharacterFootsteps : MonoBehaviour
 {
     [Header("Настройки звука")]
     [SerializeField] private AudioSource audioSource;
-    [SerializeField] private AudioClip[] footstepSounds; // Массив звуков (шаг левой, шаг правой)
-    [SerializeField] private AudioClip jumpSound;
+    [SerializeField] private AudioClip[] footstepSounds;
+    [SerializeField] private AudioClip jumpSound; // Звук прыжка/приземления
+    [SerializeField] private AudioClip landSound;       // Звук приземления
+    [SerializeField] private AudioClip takeoffSound;    // Звук отрыва от земли (добавлено)
 
     [Range(0, 1)][SerializeField] private float volume = 0.5f;
-    [SerializeField] private float pitchRange = 0.2f; // Разброс высоты звука для естественности
-    [Range(0, 1)][SerializeField] private float volumejump = 0.5f;
-
-    // Этот метод будет вызываться из анимации
+    [SerializeField] private float pitchRange = 0.2f;
+    [Range(0, 1)][SerializeField] private float volumeJump = 0.6f;
+    [Range(0, 1)][SerializeField] private float volumeTakeoff = 0.5f; // Громкость звука отрыва
+    
+    // Этот метод вызывается из АНИМАЦИИ (Animation Events)
     public void PlayFootstepSound()
     {
-        if (footstepSounds.Length == 0 || audioSource == null)
-        {
-            Debug.LogWarning("Звуки не назначены или AudioSource отсутствует!");
+        // Если скрипт на дочернем объекте, ищем контроллер в родителе
+        var controller = GetComponentInParent<PlayerSideController>();
+
+        // Если мы НЕ на земле — выходим, чтобы шаги не звучали в прыжке
+        if (controller != null && !Physics.CheckSphere(controller.groundCheck.position, 0.25f, controller.groundLayer))
             return;
+
+        if (footstepSounds.Length > 0 && audioSource != null)
+        {
+            int index = Random.Range(0, footstepSounds.Length);
+            audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+            audioSource.PlayOneShot(footstepSounds[index], volume);
         }
-
-        // Выбираем случайный звук из массива
-        int index = Random.Range(0, footstepSounds.Length);
-        AudioClip clip = footstepSounds[index];
-
-        // Немного меняем Pitch, чтобы шаги не звучали идентично
-        audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
-
-        // Воспроизводим один раз
-        audioSource.PlayOneShot(clip, volume);
-        Debug.Log("Звук");
     }
 
-    public void jumpSoundPlay()
+    // Этот метод вызывается ИЗ СКРИПТА передвижения
+    public void PlayJumpOrLandSound()
     {
-        if (footstepSounds.Length == 0 || audioSource == null)
+        if (jumpSound != null && audioSource != null)
         {
-            Debug.LogWarning("Звуки не назначены или AudioSource отсутствует!");
-            return;
+            audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+            audioSource.PlayOneShot(jumpSound, volumeJump);
         }
-
-        // Выбираем случайный звук из массива
-        int index = Random.Range(0, footstepSounds.Length);
-        AudioClip clip = footstepSounds[index];
-
-        // Немного меняем Pitch, чтобы шаги не звучали идентично
-        audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
-
-        // Воспроизводим один раз
-        audioSource.PlayOneShot(clip, volumejump);
-        Debug.Log("Звук");
     }
 
+    // НОВЫЙ МЕТОД: Звук отрыва от земли
+    public void PlayTakeoffSound()
+    {
+        if (takeoffSound != null && audioSource != null)
+        {
+            audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+            audioSource.PlayOneShot(takeoffSound, volumeTakeoff);
+        }
+    }
+
+    
 }

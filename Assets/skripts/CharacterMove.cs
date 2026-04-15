@@ -19,14 +19,19 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private Animator animator;
 
     [Header("Проверка земли")]
-    [SerializeField] private LayerMask groundLayer;
-    [SerializeField] private Transform groundCheck;
+    [SerializeField] public LayerMask groundLayer;
+    [SerializeField] public Transform groundCheck;
     [SerializeField] private float groundCheckRadius = 0.25f;
 
     private Rigidbody rb;
     private float horizontalInput;
     private bool facingRight = true;
     private Quaternion targetRotation;
+    private bool wasGrounded; // Для определения момента приземления
+
+
+    [Header("Звуки")]
+    [SerializeField] private CharacterFootsteps footstepScript;
 
     private float coyoteTimeCounter;
     private float jumpBufferCounter;
@@ -46,8 +51,12 @@ public class PlayerSideController : MonoBehaviour
 
     private void Update()
     {
+        wasGrounded = isGrounded;
         // 1. Проверка земли
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
+
+        
+        
 
         // 2. Ввод данных
         horizontalInput = Input.GetAxisRaw("Horizontal");
@@ -62,6 +71,13 @@ public class PlayerSideController : MonoBehaviour
             coyoteTimeCounter = coyoteTime;
         else
             coyoteTimeCounter -= Time.deltaTime;
+
+        if (isGrounded && !wasGrounded && Time.time - lastJumpTime > 0.2f)
+        {
+            if (footstepScript != null) footstepScript.PlayJumpOrLandSound();
+        }
+
+        
 
         // 4. Логика прыжка
         if (jumpBufferCounter > 0 && coyoteTimeCounter > 0)
@@ -78,14 +94,15 @@ public class PlayerSideController : MonoBehaviour
 
     private void ApplyJump()
     {
-        // Сбрасываем вертикальную скорость перед прыжком для стабильности
         rb.velocity = new Vector3(rb.velocity.x, jumpForce, rb.velocity.z);
-
         animator.SetBool("IsJumping", true);
+
+        // ЗВУК ПРЫЖКА (ОТРЫВА)
+        if (footstepScript != null) footstepScript.PlayTakeoffSound();
 
         jumpBufferCounter = 0f;
         coyoteTimeCounter = 0f;
-        lastJumpTime = Time.time; // Фиксируем время прыжка
+        lastJumpTime = Time.time;
     }
 
     private void UpdateAnimations()
