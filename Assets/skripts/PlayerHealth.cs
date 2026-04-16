@@ -43,31 +43,24 @@ public class PlayerHealth : MonoBehaviour
         if (isDead) return;
         isDead = true;
 
-        // 2. ОТКЛЮЧАЕМ УПРАВЛЕНИЕ (теперь переменная не null)
         if (moveScript != null) moveScript.enabled = false;
 
-        // 3. ФИКСИРУЕМ ФИЗИКУ (чтобы не проваливался и не летал)
         CharacterController cc = GetComponent<CharacterController>();
         if (cc != null)
         {
-            cc.Move(Vector3.zero); // обнуляем движение
+            cc.Move(Vector3.zero);
         }
 
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb != null)
         {
+            rb.velocity = Vector3.zero;
             rb.isKinematic = true;
-            rb.useGravity = false;
         }
 
-        // 4. ЗАПУСКАЕМ АНИМАЦИЮ (убираем anim.Play, оставляем триггеры)
-        int randomDeath = Random.Range(1, 3);
-        anim.SetInteger("deathType", randomDeath);
-
-        anim.ResetTrigger("getHit"); // Убираем накопленные удары
-        anim.SetTrigger("die");      // Чистый запуск смерти
-
-        Debug.Log("ГГ окончательно погиб");
+        anim.SetInteger("deathType", Random.Range(1, 3));
+        anim.ResetTrigger("getHit");
+        anim.SetTrigger("die");
     }
 
     void PlayHurtAnimation()
