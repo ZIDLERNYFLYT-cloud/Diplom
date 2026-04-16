@@ -23,6 +23,21 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] public Transform groundCheck;
     [SerializeField] private float groundCheckRadius = 0.25f;
 
+    [Header("Атака")]
+    [SerializeField] private Transform attackPoint;
+    [SerializeField] private float attackRange = 0.8f;
+    [SerializeField] private LayerMask enemyLayer;
+    [SerializeField] private int attackDamage = 25;
+    [SerializeField] private float attackRate = 0.5f; // Кулдаун между сериями
+    private float nextAttackTime = 0f;
+    private int comboStep = 0; // Для чередования анимаций (например, удар 1 и удар 2)
+
+    [Header("Звуки")]
+    [SerializeField] private AudioClip kickSound;    // Звук отрыва от земли (добавлено)
+    [SerializeField] private AudioSource audioSource;
+    [Range(0, 1)][SerializeField] private float volume = 0.5f;
+    [SerializeField] private float pitchRange = 0.2f;
+
     private Rigidbody rb;
     private float horizontalInput;
     private bool facingRight = true;
@@ -55,8 +70,14 @@ public class PlayerSideController : MonoBehaviour
         // 1. Проверка земли
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
 
-        
-        
+
+        if (Time.time >= nextAttackTime)
+        {
+            if (Input.GetMouseButton(0)) // По умолчанию ЛКМ или Ctrl
+            {
+                Attack();
+            }
+        }
 
         // 2. Ввод данных
         horizontalInput = Input.GetAxisRaw("Horizontal");
@@ -90,6 +111,39 @@ public class PlayerSideController : MonoBehaviour
 
         // 6. Управление анимациями
         UpdateAnimations();
+    }
+
+    public void Hit()
+    {
+        Collider[] hitEnemies = Physics.OverlapSphere(attackPoint.position, attackRange, enemyLayer);
+
+        foreach (Collider enemy in hitEnemies)
+        {
+            // Ищем скрипт EnemyAI на задетом объекте
+            EnemyAI enemyAI = enemy.GetComponent<EnemyAI>();
+            if (enemyAI != null)
+            {
+                enemyAI.TakeDamage(attackDamage);
+
+            }
+            
+            audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+            audioSource.PlayOneShot(kickSound, volume);
+        }
+    }
+
+    private void Attack()
+    {
+        // Блокируем движение во время атаки (опционально)
+        // rb.velocity = new Vector3(0, rb.velocity.y, 0); 
+
+        // Выбираем тип удара (1 или 2)
+        comboStep = (comboStep == 1) ? 2 : 1;
+
+        animator.SetInteger("AttackType", comboStep);
+        animator.SetTrigger("Attack");
+
+        nextAttackTime = Time.time + attackRate;
     }
 
     private void ApplyJump()
@@ -163,6 +217,12 @@ public class PlayerSideController : MonoBehaviour
         {
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        }
+
+        if (attackPoint != null)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(attackPoint.position, attackRange);
         }
     }
 }
