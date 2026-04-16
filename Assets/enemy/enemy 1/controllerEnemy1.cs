@@ -1,271 +1,185 @@
 using UnityEngine;
+using UnityEngine.AI;
+using System.Collections;
 
 public class EnemyAI : MonoBehaviour
 {
-    [Header("Настройки движения")]
-    [SerializeField] private float moveSpeed = 2f;
-    [SerializeField] private float patrolDistance = 5f;
-    [SerializeField] private float randomOffset = 2f;
-    [SerializeField] private float waitTimeAtEdge = 1f;
+    public enum State { Idle, Patrol, Chase, Attack }
+    public State currentState = State.Idle;
 
-    [Header("Настройки обнаружения")]
-    [SerializeField] private Transform player;
-    [SerializeField] private float detectionRange = 8f;
-    [SerializeField] private LayerMask obstacleLayer;
-    [SerializeField] private float chaseSpeed = 3.5f;
+    [Header("Настройки движения")]
+    public float walkSpeed = 2f;
+    public float chaseSpeed = 4f;
+    public float patrolRadius = 5f;
+    public float stopDistance = 1.5f;
+    public float detectionRange = 7f;
+
+    [Header("Ссылки")]
+    public Transform player;
+    public Animator anim;
+    public AudioSource audioSource;
+    public AudioClip screamSound;
+
+    private Vector3 startPosition;
+    private Vector3 patrolTarget;
+    private bool hasScreamed = false;
+    private float stateTimer;
 
     [Header("Настройки атаки")]
-    [SerializeField] private float attackRange = 1.5f;
-    [SerializeField] private float attackCooldown = 1f;
-    [SerializeField] private int attackDamage = 10;
+    public Transform attackPoint; // Пустая пустышка (GameObject) перед руками зомби
+    public float attackRange = 0.5f; // Радиус удара
+    public LayerMask playerLayer; // Выбери Layer "Player" в инспекторе
+    public int damage = 10;
 
-    [Header("Настройки звука")]
-    [SerializeField] private AudioSource audioSource;
-    [SerializeField] private AudioClip screamSound;
-
-    [Header("Настройки анимации")]
-    [SerializeField] private Animator animator;
-
-    private float leftBoundary;
-    private float rightBoundary;
-    private float currentWaitTime;
-    private bool isWaiting;
-    private bool isChasing;
-    private bool isAttacking;
-    private float lastAttackTime;
-    private int facingDirection = 1;
-    private float screamCooldown = 0f;
-
-    private enum EnemyState
+    void Start()
     {
-        Idle,
-        Walking,
-        Chasing,
-        Attacking
+        startPosition = transform.position;
+        SetNewPatrolTarget();
+        player = GameObject.FindGameObjectWithTag("Player").transform;
     }
 
-    private EnemyState currentState = EnemyState.Walking;
-
-    private void Start()
+    void Update()
     {
-        if (player == null)
+        // Считаем дистанцию только по горизонтали (X)
+        float distanceToPlayer = Mathf.Abs(transform.position.x - player.position.x);
+        // Для общей проверки (на всякий случай учитываем и высоту Y)
+        float fullDistance = Vector3.Distance(transform.position, player.position);
+
+        switch (currentState)
         {
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
-            {
-                player = playerObj.transform;
-            }
-            else
-            {
-                Debug.LogError("Player not found! Please assign Player transform in inspector.");
-            }
+            case State.Idle:
+                UpdateIdleState(fullDistance);
+                break;
+            case State.Patrol:
+                UpdatePatrolState(fullDistance);
+                break;
+            case State.Chase:
+                UpdateChaseState(distanceToPlayer); // Передаем X-дистанцию
+                break;
+            case State.Attack:
+                UpdateAttackState(distanceToPlayer); // Передаем X-дистанцию
+                break;
         }
-
-        float randomPatrolDistance = patrolDistance + Random.Range(-randomOffset, randomOffset);
-        leftBoundary = transform.position.x - randomPatrolDistance;
-        rightBoundary = transform.position.x + randomPatrolDistance;
-
-        if (audioSource == null)
-            audioSource = GetComponent<AudioSource>();
-
-        if (animator == null)
-            animator = GetComponent<Animator>();
     }
 
-    private void Update()
+    // --- Логика состояний ---
+
+    void UpdateIdleState(float distance)
     {
-        if (player == null) return;
+        anim.SetBool("isWalking", false);
+        stateTimer -= Time.deltaTime;
 
-        bool canSeePlayer = CanSeePlayer();
+        if (distance < detectionRange) TransitionToChase();
+        else if (stateTimer <= 0) currentState = State.Patrol;
+    }
 
-        if (canSeePlayer && !isChasing)
+    void UpdatePatrolState(float distance)
+    {
+        anim.SetBool("isWalking", true);
+        MoveTowards(patrolTarget, walkSpeed);
+
+        if (distance < detectionRange) TransitionToChase();
+        else if (Vector3.Distance(transform.position, patrolTarget) < 0.5f)
         {
-            OnPlayerDetected();
+            stateTimer = Random.Range(1f, 3f); // Пауза для естественности
+            SetNewPatrolTarget();
+            currentState = State.Idle;
+        }
+    }
+
+    void UpdateChaseState(float xDistance)
+    {
+        anim.SetBool("isWalking", true);
+        MoveTowards(player.position, chaseSpeed);
+
+        // Если подошли вплотную по X
+        if (xDistance <= stopDistance)
+        {
+            currentState = State.Attack;
+        }
+    }
+
+    void UpdateAttackState(float distance)
+    {
+        anim.SetBool("isWalking", false);
+
+        // Поворачиваемся к игроку только по горизонтали (ось Y)
+        LookAtTarget(player.position);
+
+        stateTimer -= Time.deltaTime;
+        if (stateTimer <= 0)
+        {
+            anim.SetTrigger("punch");
+            stateTimer = 1.5f;
         }
 
-        if (isChasing)
+        if (distance > stopDistance + 0.2f) currentState = State.Chase;
+    }
+
+    // --- Помощники ---
+
+    void TransitionToChase()
+    {
+        if (!hasScreamed)
         {
-            ChasePlayer();
+            audioSource.PlayOneShot(screamSound);
+            hasScreamed = true;
+        }
+        currentState = State.Chase;
+    }
+
+    void MoveTowards(Vector3 target, float speed)
+    {
+        // Движение только по оси X и Y (игнорируем Z для 2D-подобного движения)
+        Vector3 targetPos = new Vector3(target.x, transform.position.y, transform.position.z);
+        transform.position = Vector3.MoveTowards(transform.position, targetPos, speed * Time.deltaTime);
+
+        // Поворот в сторону цели
+        LookAtTarget(target);
+    }
+
+    void SetNewPatrolTarget()
+    {
+        float randomX = Random.Range(-patrolRadius, patrolRadius);
+        patrolTarget = startPosition + new Vector3(randomX, 0, 0);
+    }
+
+    void LookAtTarget(Vector3 target)
+    {
+        if (target.x > transform.position.x)
+        {
+            // Смотрим вправо
+            transform.rotation = Quaternion.Euler(0, 180, 0);
         }
         else
         {
-            Patrol();
+            // Смотрим влево
+            transform.rotation = Quaternion.Euler(0, 0, 0);
         }
-
-        UpdateAnimation();
-        UpdateFacingDirection();
-
-        if (screamCooldown > 0)
-            screamCooldown -= Time.deltaTime;
-    }
-
-    private bool CanSeePlayer()
-    {
-        if (player == null) return false;
-
-        float distanceToPlayer = Vector3.Distance(transform.position, player.position);
-        if (distanceToPlayer > detectionRange)
-            return false;
-
-        Vector3 directionToPlayer = (player.position - transform.position).normalized;
-        RaycastHit hit;
-
-        if (Physics.Raycast(transform.position, directionToPlayer, out hit, detectionRange, obstacleLayer))
-        {
-            if (hit.transform.CompareTag("Player"))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private void OnPlayerDetected()
-    {
-        if (!isChasing)
-        {
-            isChasing = true;
-            currentState = EnemyState.Chasing;
-
-            if (screamSound != null && audioSource != null && screamCooldown <= 0)
-            {
-                audioSource.PlayOneShot(screamSound);
-                screamCooldown = 1f;
-            }
-
-            Debug.Log("Enemy detected player! Starting chase!");
-        }
-    }
-
-    private void Patrol()
-    {
-        float currentX = transform.position.x;
-
-        if (!isWaiting && (currentX <= leftBoundary || currentX >= rightBoundary))
-        {
-            isWaiting = true;
-            currentWaitTime = waitTimeAtEdge;
-            currentState = EnemyState.Idle;
-            return;
-        }
-
-        if (isWaiting)
-        {
-            currentWaitTime -= Time.deltaTime;
-            if (currentWaitTime <= 0)
-            {
-                isWaiting = false;
-                currentState = EnemyState.Walking;
-                facingDirection *= -1;
-            }
-            return;
-        }
-
-        currentState = EnemyState.Walking;
-        float moveDirection = facingDirection;
-        Vector3 movement = new Vector3(moveDirection * moveSpeed * Time.deltaTime, 0, 0);
-        transform.position += movement;
-    }
-
-    private void ChasePlayer()
-    {
-        if (player == null) return;
-
-        float distanceToPlayer = Vector3.Distance(transform.position, player.position);
-
-        if (distanceToPlayer <= attackRange)
-        {
-            if (Time.time >= lastAttackTime + attackCooldown)
-            {
-                Attack();
-            }
-            currentState = EnemyState.Attacking;
-            return;
-        }
-
-        if (distanceToPlayer > detectionRange * 1.5f)
-        {
-            isChasing = false;
-            currentState = EnemyState.Walking;
-            Debug.Log("Enemy lost player, returning to patrol");
-            return;
-        }
-
-        currentState = EnemyState.Chasing;
-        float direction = player.position.x > transform.position.x ? 1 : -1;
-        facingDirection = (int)direction; // Явное приведение типа
-
-        Vector3 movement = new Vector3(direction * chaseSpeed * Time.deltaTime, 0, 0);
-        transform.position += movement;
-    }
-
-    private void Attack()
-    {
-        isAttacking = true;
-        lastAttackTime = Time.time;
-
-        //if (player != null)
-        //{
-        //    PlayerHealth playerHealth = player.GetComponent<PlayerHealth>();
-        //    if (playerHealth != null)
-        //    {
-        //        playerHealth.TakeDamage(attackDamage);
-        //        Debug.Log($"Enemy attacked player for {attackDamage} damage!");
-        //    }
-        //}
-
-        if (animator != null)
-        {
-            animator.SetTrigger("Attack");
-        }
-
-        Invoke(nameof(ResetAttack), 0.5f);
-    }
-
-    private void ResetAttack()
-    {
-        isAttacking = false;
-    }
-
-    private void UpdateAnimation()
-    {
-        if (animator == null) return;
-
-        // Определяем текущую скорость для аниматора
-        float currentAnimSpeed = 0f;
-        if (currentState == EnemyState.Walking) currentAnimSpeed = 0.5f; // Для Walk
-        if (currentState == EnemyState.Chasing) currentAnimSpeed = 1f;   // Для Walk (быстрее)
-        if (currentState == EnemyState.Idle) currentAnimSpeed = 0f;      // Для Idle
-
-        animator.SetFloat("Speed", currentAnimSpeed);
-    }
-
-    private void UpdateFacingDirection()
-    {
-        if (facingDirection != 0)
-        {
-            Vector3 scale = transform.localScale;
-            scale.x = Mathf.Abs(scale.x) * facingDirection;
-            transform.localScale = scale;
-        }
+        // ПРИМЕЧАНИЕ: Если модель изначально повернута спиной, 
+        // поменяй углы 90 и -90 местами или на 270 и 90.
     }
 
     private void OnDrawGizmosSelected()
     {
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, detectionRange);
-
+        if (attackPoint == null) return;
         Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, attackRange);
+        Gizmos.DrawWireSphere(attackPoint.position, attackRange);
+    }
 
-        if (Application.isPlaying)
+    public void EnemyAttackHit()
+    {
+        if (attackPoint == null) return;
+
+        // Создаем невидимую сферу и проверяем, попал ли в нее игрок
+        Collider[] hitPlayers = Physics.OverlapSphere(attackPoint.position, attackRange, playerLayer);
+
+        foreach (Collider playerObj in hitPlayers)
         {
-            Gizmos.color = Color.green;
-            Gizmos.DrawLine(new Vector3(leftBoundary, transform.position.y - 1, transform.position.z),
-                           new Vector3(leftBoundary, transform.position.y + 1, transform.position.z));
-            Gizmos.DrawLine(new Vector3(rightBoundary, transform.position.y - 1, transform.position.z),
-                           new Vector3(rightBoundary, transform.position.y + 1, transform.position.z));
+            Debug.Log("Попал по игроку!");
+
+            
+            playerObj.GetComponent<PlayerHealth>().TakeDamage(damage);
         }
     }
 }
