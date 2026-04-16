@@ -39,12 +39,15 @@ public class EnemyAI : MonoBehaviour
     public LayerMask playerLayer;
     public int damage = 10;
 
+    private float lockedZ; // Переменная для хранения Z
+
     void Start()
     {
         currentHealth = maxHealth; // Инициализация здоровья
         startPosition = transform.position;
         SetNewPatrolTarget();
         player = GameObject.FindGameObjectWithTag("Player").transform;
+        lockedZ = transform.position.z;
     }
 
     void Update()
@@ -61,6 +64,7 @@ public class EnemyAI : MonoBehaviour
             case State.Chase: UpdateChaseState(distanceToPlayer); break;
             case State.Attack: UpdateAttackState(distanceToPlayer); break;
         }
+      
     }
 
     // --- НОВЫЙ МЕТОД: ПОЛУЧЕНИЕ УРОНА ---
@@ -121,14 +125,34 @@ public class EnemyAI : MonoBehaviour
     void UpdatePatrolState(float distance)
     {
         anim.SetBool("isWalking", true);
+
+        // Пускаем луч вперед на небольшое расстояние
+        Vector3 direction = (patrolTarget.x > transform.position.x) ? Vector3.right : Vector3.left;
+        RaycastHit hit;
+
+        // Проверяем, нет ли стены впереди (на расстоянии 0.7 метра)
+        // Убедитесь, что стены имеют слой, который вы укажете (например, "Ground")
+        if (Physics.Raycast(transform.position + Vector3.up, direction, out hit, 0.7f))
+        {
+            // Если луч попал в стену - останавливаемся и меняем цель
+            StopAndPickNewTarget();
+            return;
+        }
+
         MoveTowards(patrolTarget, walkSpeed);
+
         if (distance < detectionRange) TransitionToChase();
         else if (Vector3.Distance(transform.position, patrolTarget) < 0.5f)
         {
-            stateTimer = Random.Range(1f, 3f);
-            SetNewPatrolTarget();
-            currentState = State.Idle;
+            StopAndPickNewTarget();
         }
+    }
+
+    void StopAndPickNewTarget()
+    {
+        stateTimer = Random.Range(1f, 3f);
+        SetNewPatrolTarget();
+        currentState = State.Idle;
     }
 
     void UpdateChaseState(float xDistance)

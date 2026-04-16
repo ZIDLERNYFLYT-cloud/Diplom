@@ -58,6 +58,14 @@ public class PlayerSideController : MonoBehaviour
     private float fallStartHeight; // Высота на которой началось падение
     private float currentFallDistance; // Текущее пройденное расстояние падения
 
+    [Header("Доступные способности")]
+    [SerializeField] private bool canJump = false; // По умолчанию прыжок закрыт
+    private float lockedZ; // Переменная для хранения Z
+
+    private void Start()
+    {
+        lockedZ = transform.position.z;
+    }
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -104,7 +112,8 @@ public class PlayerSideController : MonoBehaviour
         }
 
         // 4. Логика прыжка
-        if (jumpBufferCounter > 0 && coyoteTimeCounter > 0)
+        
+        if (canJump && jumpBufferCounter > 0 && coyoteTimeCounter > 0) // Добавили canJump
         {
             ApplyJump();
         }
@@ -117,47 +126,43 @@ public class PlayerSideController : MonoBehaviour
 
         // 7. Отслеживание падения для анимации
         CheckFallingState();
+
+        
     }
 
     private void CheckFallingState()
     {
-        // Если не на земле и падаем вниз
-        if (!isGrounded && rb.velocity.y < -0.5f)
+        // Если на земле — сбрасываем всё
+        if (isGrounded)
+        {
+            if (wasFalling || animator.GetBool("IsFalling"))
+            {
+                wasFalling = false;
+                animator.SetBool("IsFalling", false);
+                currentFallDistance = 0f;
+            }
+            return;
+        }
+
+        // Если в воздухе и летим вниз
+        if (rb.velocity.y < -0.5f)
         {
             if (!wasFalling)
             {
-                // Только начали падать - запоминаем высоту
                 wasFalling = true;
                 fallStartHeight = transform.position.y;
                 currentFallDistance = 0f;
             }
             else
             {
-                // Рассчитываем текущее расстояние падения
                 currentFallDistance = fallStartHeight - transform.position.y;
 
-                // Анимация падения включается только когда пролетели足够距离
+                // Включаем анимацию только один раз при достижении дистанции
                 if (currentFallDistance >= minFallDistance && !animator.GetBool("IsFalling"))
                 {
                     animator.SetBool("IsFalling", true);
                     animator.SetBool("IsJumping", false);
                 }
-            }
-        }
-        else
-        {
-            // На земле или поднимаемся вверх
-            if (wasFalling)
-            {
-                wasFalling = false;
-
-                // Сбрасываем анимацию падения при приземлении
-                if (animator.GetBool("IsFalling"))
-                {
-                    animator.SetBool("IsFalling", false);
-                }
-
-                currentFallDistance = 0f;
             }
         }
     }
@@ -210,35 +215,27 @@ public class PlayerSideController : MonoBehaviour
 
     private void UpdateAnimations()
     {
-        // Анимация бега (только когда на земле)
+        // Анимация бега
         float animSpeed = isGrounded ? Mathf.Abs(horizontalInput) : 0f;
         animator.SetFloat("Speed", animSpeed);
 
-        // Логика для анимации прыжка и падения
-        if (isGrounded && rb.velocity.y <= 0.1f && Time.time - lastJumpTime > 0.1f)
-        {
-            animator.SetBool("IsJumping", false);
-            animator.SetBool("IsFalling", false);
-            currentFallDistance = 0f;
-        }
-
-        // Если поднимаемся вверх после прыжка (не падаем)
+        // Логика прыжка (взлет)
         if (!isGrounded && rb.velocity.y > 0.5f)
         {
             animator.SetBool("IsJumping", true);
-            // Не сбрасываем IsFalling здесь, так как могли начать падать, а потом опять подпрыгнуть (редко)
         }
 
-        // Если падаем вниз, но расстояние еще маленькое - не включаем анимацию падения
-        // (анимация падения включается только в CheckFallingState после достижения minFallDistance)
-        if (!isGrounded && rb.velocity.y < -0.5f && currentFallDistance < minFallDistance)
+        // Приземление: сброс прыжка
+        if (isGrounded && animator.GetBool("IsJumping"))
         {
-            // Падаем, но расстояние еще маленькое - показываем анимацию прыжка или ничего
-            if (!animator.GetBool("IsJumping") && !animator.GetBool("IsFalling"))
-            {
-                // Можно оставить без анимации или показать переходную
-            }
+            animator.SetBool("IsJumping", false);
         }
+    }
+
+    public void UnlockJump()
+    {
+        canJump = true;
+        Debug.Log("Прыжок разблокирован!");
     }
 
     private void HandleRotation()
