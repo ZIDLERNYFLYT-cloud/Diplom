@@ -17,6 +17,7 @@ public class PlayerSideController : MonoBehaviour
 
     [Header("Анимации")]
     [SerializeField] private Animator animator;
+    [SerializeField] private float minFallDistance = 1.5f; // Минимальное расстояние падения для активации анимации
 
     [Header("Проверка земли")]
     [SerializeField] public LayerMask groundLayer;
@@ -28,12 +29,12 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float attackRange = 0.8f;
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private int attackDamage = 25;
-    [SerializeField] private float attackRate = 0.5f; // Кулдаун между сериями
+    [SerializeField] private float attackRate = 0.5f;
     private float nextAttackTime = 0f;
-    private int comboStep = 0; // Для чередования анимаций (например, удар 1 и удар 2)
+    private int comboStep = 0;
 
     [Header("Звуки")]
-    [SerializeField] private AudioClip kickSound;    // Звук отрыва от земли (добавлено)
+    [SerializeField] private AudioClip kickSound;
     [SerializeField] private AudioSource audioSource;
     [Range(0, 1)][SerializeField] private float volume = 0.5f;
     [SerializeField] private float pitchRange = 0.2f;
@@ -42,8 +43,7 @@ public class PlayerSideController : MonoBehaviour
     private float horizontalInput;
     private bool facingRight = true;
     private Quaternion targetRotation;
-    private bool wasGrounded; // Для определения момента приземления
-
+    private bool wasGrounded;
 
     [Header("Звуки")]
     [SerializeField] private CharacterFootsteps footstepScript;
@@ -51,7 +51,12 @@ public class PlayerSideController : MonoBehaviour
     private float coyoteTimeCounter;
     private float jumpBufferCounter;
     private bool isGrounded;
-    private float lastJumpTime; // Задержка для стабильности анимации
+    private float lastJumpTime;
+
+    // Для отслеживания состояния падения
+    private bool wasFalling;
+    private float fallStartHeight; // Высота на которой началось падение
+    private float currentFallDistance; // Текущее пройденное расстояние падения
 
     private void Awake()
     {
@@ -67,13 +72,13 @@ public class PlayerSideController : MonoBehaviour
     private void Update()
     {
         wasGrounded = isGrounded;
+
         // 1. Проверка земли
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
 
-
         if (Time.time >= nextAttackTime)
         {
-            if (Input.GetMouseButton(0)) // По умолчанию ЛКМ или Ctrl
+            if (Input.GetMouseButton(0))
             {
                 Attack();
             }
@@ -98,8 +103,6 @@ public class PlayerSideController : MonoBehaviour
             if (footstepScript != null) footstepScript.PlayJumpOrLandSound();
         }
 
-        
-
         // 4. Логика прыжка
         if (jumpBufferCounter > 0 && coyoteTimeCounter > 0)
         {
@@ -111,6 +114,52 @@ public class PlayerSideController : MonoBehaviour
 
         // 6. Управление анимациями
         UpdateAnimations();
+
+        // 7. Отслеживание падения для анимации
+        CheckFallingState();
+    }
+
+    private void CheckFallingState()
+    {
+        // Если не на земле и падаем вниз
+        if (!isGrounded && rb.velocity.y < -0.5f)
+        {
+            if (!wasFalling)
+            {
+                // Только начали падать - запоминаем высоту
+                wasFalling = true;
+                fallStartHeight = transform.position.y;
+                currentFallDistance = 0f;
+            }
+            else
+            {
+                // Рассчитываем текущее расстояние падения
+                currentFallDistance = fallStartHeight - transform.position.y;
+
+                // Анимация падения включается только когда пролетели足够距离
+                if (currentFallDistance >= minFallDistance && !animator.GetBool("IsFalling"))
+                {
+                    animator.SetBool("IsFalling", true);
+                    animator.SetBool("IsJumping", false);
+                }
+            }
+        }
+        else
+        {
+            // На земле или поднимаемся вверх
+            if (wasFalling)
+            {
+                wasFalling = false;
+
+                // Сбрасываем анимацию падения при приземлении
+                if (animator.GetBool("IsFalling"))
+                {
+                    animator.SetBool("IsFalling", false);
+                }
+
+                currentFallDistance = 0f;
+            }
+        }
     }
 
     public void Hit()
@@ -119,14 +168,12 @@ public class PlayerSideController : MonoBehaviour
 
         foreach (Collider enemy in hitEnemies)
         {
-            // Ищем скрипт EnemyAI на задетом объекте
             EnemyAI enemyAI = enemy.GetComponent<EnemyAI>();
             if (enemyAI != null)
             {
                 enemyAI.TakeDamage(attackDamage);
-
             }
-            
+
             audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
             audioSource.PlayOneShot(kickSound, volume);
         }
@@ -134,10 +181,8 @@ public class PlayerSideController : MonoBehaviour
 
     private void Attack()
     {
-        // Блокируем движение во время атаки (опционально)
-        // rb.velocity = new Vector3(0, rb.velocity.y, 0); 
+        rb.velocity = new Vector3(0, rb.velocity.y, 0);
 
-        // Выбираем тип удара (1 или 2)
         comboStep = (comboStep == 1) ? 2 : 1;
 
         animator.SetInteger("AttackType", comboStep);
@@ -149,9 +194,13 @@ public class PlayerSideController : MonoBehaviour
     private void ApplyJump()
     {
         rb.velocity = new Vector3(rb.velocity.x, jumpForce, rb.velocity.z);
+
+        // Сбрасываем флаг падения при прыжке вверх
+        wasFalling = false;
+        currentFallDistance = 0f;
+        animator.SetBool("IsFalling", false);
         animator.SetBool("IsJumping", true);
 
-        // ЗВУК ПРЫЖКА (ОТРЫВА)
         if (footstepScript != null) footstepScript.PlayTakeoffSound();
 
         jumpBufferCounter = 0f;
@@ -165,18 +214,30 @@ public class PlayerSideController : MonoBehaviour
         float animSpeed = isGrounded ? Mathf.Abs(horizontalInput) : 0f;
         animator.SetFloat("Speed", animSpeed);
 
-        // Сброс анимации прыжка
-        // Добавляем условие (Time.time - lastJumpTime > 0.1f), чтобы анимация 
-        // не выключалась в момент отрыва от земли, пока CheckSphere еще касается пола.
+        // Логика для анимации прыжка и падения
         if (isGrounded && rb.velocity.y <= 0.1f && Time.time - lastJumpTime > 0.1f)
         {
             animator.SetBool("IsJumping", false);
+            animator.SetBool("IsFalling", false);
+            currentFallDistance = 0f;
         }
 
-        // Если падаем (например, сошли с уступа), тоже включаем анимацию прыжка
-        if (!isGrounded && rb.velocity.y < -0.5f)
+        // Если поднимаемся вверх после прыжка (не падаем)
+        if (!isGrounded && rb.velocity.y > 0.5f)
         {
             animator.SetBool("IsJumping", true);
+            // Не сбрасываем IsFalling здесь, так как могли начать падать, а потом опять подпрыгнуть (редко)
+        }
+
+        // Если падаем вниз, но расстояние еще маленькое - не включаем анимацию падения
+        // (анимация падения включается только в CheckFallingState после достижения minFallDistance)
+        if (!isGrounded && rb.velocity.y < -0.5f && currentFallDistance < minFallDistance)
+        {
+            // Падаем, но расстояние еще маленькое - показываем анимацию прыжка или ничего
+            if (!animator.GetBool("IsJumping") && !animator.GetBool("IsFalling"))
+            {
+                // Можно оставить без анимации или показать переходную
+            }
         }
     }
 
@@ -202,7 +263,6 @@ public class PlayerSideController : MonoBehaviour
 
     private void FixedUpdate()
     {
-        // Движение через AddForce для правильной работы физики
         float targetSpeed = horizontalInput * moveSpeed;
         float speedDiff = targetSpeed - rb.velocity.x;
         float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
