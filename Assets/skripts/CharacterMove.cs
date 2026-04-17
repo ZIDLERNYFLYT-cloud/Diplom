@@ -62,10 +62,19 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private bool canJump = false; // По умолчанию прыжок закрыт
     private float lockedZ; // Переменная для хранения Z
 
+
+    [Header("Стрельба и Прицеливание")]
+    private bool isAiming;
+    [SerializeField] private float aimLayerWeightSpeed = 5f;
+    private int topLayerIndex;
+
     private void Start()
     {
         lockedZ = transform.position.z;
+        topLayerIndex = animator.GetLayerIndex("TopLayer"); // Убедитесь, что слой в аниматоре называется так
     }
+
+    
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -78,21 +87,28 @@ public class PlayerSideController : MonoBehaviour
     }
 
     private void Update()
+
+
     {
         wasGrounded = isGrounded;
-
-        // 1. Проверка земли
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
+
+        // --- ЛОГИКА ПРИЦЕЛИВАНИЯ И СТРЕЛЬБЫ ---
+        isAiming = Input.GetMouseButton(1); // Зажата ПКМ
+        animator.SetBool("isAiming", isAiming);
+        UpdateAimLayerWeight();
 
         if (Time.time >= nextAttackTime)
         {
-            if (Input.GetMouseButton(0))
+            // Добавляем проверку: !Input.GetMouseButton(1)
+            if (Input.GetMouseButton(0) && !Input.GetMouseButton(1))
             {
                 Attack();
             }
         }
+        // ---------------------------------------
 
-        // 2. Ввод данных
+        // 2. Ввод данных движения
         horizontalInput = Input.GetAxisRaw("Horizontal");
 
         // 3. Таймеры прыжка и койота
@@ -130,6 +146,26 @@ public class PlayerSideController : MonoBehaviour
         
     }
 
+
+    private void UpdateAimLayerWeight()
+    {
+        if (topLayerIndex == -1) return;
+
+        float targetWeight = isAiming ? 1f : 0f;
+        float currentWeight = animator.GetLayerWeight(topLayerIndex);
+        float newWeight = Mathf.Lerp(currentWeight, targetWeight, Time.deltaTime * aimLayerWeightSpeed);
+        animator.SetLayerWeight(topLayerIndex, newWeight);
+    }
+
+
+    private void Shoot()
+    {
+        animator.SetTrigger("Shoot");
+        nextAttackTime = Time.time + attackRate;
+
+        // Здесь ваша логика Raycast или спавна пули
+        Debug.Log("Выстрел!");
+    }
     private void CheckFallingState()
     {
         // Если на земле — сбрасываем всё
@@ -186,6 +222,7 @@ public class PlayerSideController : MonoBehaviour
 
     private void Attack()
     {
+        // Блокируем движение во время удара (опционально, как в вашем коде)
         rb.velocity = new Vector3(0, rb.velocity.y, 0);
 
         comboStep = (comboStep == 1) ? 2 : 1;
