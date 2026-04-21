@@ -3,35 +3,50 @@ using UnityEngine;
 public class Bullet : MonoBehaviour
 {
     [Header("Настройки")]
-    [SerializeField] private float lifeTime = 3f; // Сколько секунд живет пуля
-    [SerializeField] private int damage = 20;     // Урон пули
-    [SerializeField] private GameObject hitEffect; // Префаб эффекта попадания (искры/кровь)
+    [SerializeField] private float lifeTime = 3f;
+    [SerializeField] private int damage = 20;
+    [SerializeField] private GameObject hitEffect;
+
+    private bool hasHit = false;
 
     private void Start()
     {
-        // Уничтожаем объект через заданное время, чтобы пули не летели вечно
         Destroy(gameObject, lifeTime);
     }
 
-    private void OnCollisionEnter(Collision collision)
+    // CharacterController обычно реагирует на OnCollisionEnter, 
+    // но если пуля очень быстрая, лучше использовать OnTriggerEnter
+    private void OnTriggerEnter(Collider other)
     {
-        // 1. Проверяем, есть ли у объекта, в который попали, компонент здоровья или скрипт врага
-        // Допустим, у ваших врагов есть метод TakeDamage
-        if (collision.gameObject.TryGetComponent(out EnemyAI enemy))
+        if (hasHit) return;
+
+        // Игнорируем игрока
+        if (other.CompareTag("Player")) return;
+
+        // 1. Ищем скрипт врага (в самом объекте или у родителя)
+        EnemyAI enemy = other.GetComponent<EnemyAI>() ?? other.GetComponentInParent<EnemyAI>();
+
+        if (enemy != null)
         {
             enemy.TakeDamage(damage);
+            hasHit = true;
+            SpawnHitEffect(transform.position, -transform.forward);
+            Destroy(gameObject);
         }
+        // 2. Если попали в стену или другой статический объект
+        else if (!other.isTrigger)
+        {
+            SpawnHitEffect(transform.position, -transform.forward);
+            Destroy(gameObject);
+        }
+    }
 
-        // 2. Создаем эффект попадания, если он назначен
+    private void SpawnHitEffect(Vector3 point, Vector3 normal)
+    {
         if (hitEffect != null)
         {
-            // Спавним искры в точке контакта и разворачиваем их в сторону нормали (от поверхности)
-            ContactPoint contact = collision.contacts[0];
-            GameObject effect = Instantiate(hitEffect, contact.point, Quaternion.LookRotation(contact.normal));
-            Destroy(effect, 1f); // Удаляем эффект через секунду
+            GameObject effect = Instantiate(hitEffect, point, Quaternion.LookRotation(normal));
+            Destroy(effect, 1f);
         }
-
-        // 3. Уничтожаем саму пулю при столкновении
-        Destroy(gameObject);
     }
 }

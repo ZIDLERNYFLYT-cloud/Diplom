@@ -1857,7 +1857,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   target: {fileID: 2024768957}
-  offset: {x: 0, y: 1, z: -6}
+  offset: {x: 0, y: 1, z: -9}
   sensitivity: 3
   xLimit: 7
   yLimit: 7
@@ -2616,6 +2616,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: cf8443763fc34314490f8a3e2f94dd37, type: 3}
+--- !u!4 &1499715577 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 5048025441337412694, guid: fd5d3c5ef33759c4ab67fdcee7724e3b, type: 3}
+  m_PrefabInstance: {fileID: 78231315}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1530864170
 GameObject:
   m_ObjectHideFlags: 0
@@ -2811,8 +2816,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1613314979}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0, y: 1.027, z: 0.471}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 1.027, z: 0.47100037}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2887,6 +2892,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: cf8443763fc34314490f8a3e2f94dd37, type: 3}
+--- !u!4 &1683596090 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -104578136787704052, guid: fd5d3c5ef33759c4ab67fdcee7724e3b, type: 3}
+  m_PrefabInstance: {fileID: 78231315}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1753621086
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -3458,6 +3468,7 @@ GameObject:
   - component: {fileID: 2024768958}
   - component: {fileID: 2024768959}
   - component: {fileID: 2024768960}
+  - component: {fileID: 2024768961}
   m_Layer: 7
   m_Name: player
   m_TagString: Player
@@ -3502,8 +3513,8 @@ MonoBehaviour:
   audioSource: {fileID: 511797239}
   volume: 0.5
   pitchRange: 0.2
-  footstepScript: {fileID: 2024768959}
   canJump: 0
+  footstepScript: {fileID: 2024768959}
 --- !u!136 &2024768955
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -3569,8 +3580,8 @@ Transform:
   m_Children:
   - {fileID: 662739435}
   - {fileID: 272693235}
-  - {fileID: 511797240}
   - {fileID: 1613314980}
+  - {fileID: 511797240}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
 --- !u!95 &2024768958
@@ -3633,6 +3644,25 @@ MonoBehaviour:
   anim: {fileID: 2024768958}
   audioSource: {fileID: 511797239}
   hurtSound: {fileID: 8300000, guid: 3685bc0991de1ff41b2230d8f96592c9, type: 3}
+--- !u!114 &2024768961
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2024768953}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2a4d8c83d778084ab489cf6bc036ce0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  armBone: {fileID: 1499715577}
+  armRotationOffset: {x: 0, y: 90, z: 0}
+  rotationSpeed: 15
+  bulletPrefab: {fileID: 4752596253379431902, guid: ba4db63bb88858042a5be77c43269781, type: 3}
+  firePoint: {fileID: 1683596090}
+  bulletForce: 20
+  fireRate: 0.25
 --- !u!1 &2051392653
 GameObject:
   m_ObjectHideFlags: 0

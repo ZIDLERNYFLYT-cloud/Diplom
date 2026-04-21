@@ -4,12 +4,12 @@ public class PlayerShooting : MonoBehaviour
 {
     private Animator anim;
     private Camera mainCam;
-    private PlayerSideController movementScript; // Ссылка на ваш основной скрипт движения
+    private PlayerSideController movementScript;
 
-    [Header("Настройки анимации")]
-    [SerializeField] private float aimLayerWeightSpeed = 8f;
-    private int topLayerIndex;
-    private bool isAiming;
+    [Header("Настройки костей")]
+    [SerializeField] private Transform armBone; // Плечо правой руки
+    [SerializeField] private Vector3 armRotationOffset = new Vector3(0, 90, 0);
+    [SerializeField] private float rotationSpeed = 15f;
 
     [Header("Стрельба")]
     [SerializeField] private GameObject bulletPrefab;
@@ -18,13 +18,8 @@ public class PlayerShooting : MonoBehaviour
     [SerializeField] private float fireRate = 0.25f;
     private float nextFireTime;
 
-    [Header("Звуки")]
-    [SerializeField] private AudioSource audioSource;
-    [SerializeField] private AudioClip shootSound;
-
-    [Header("IK и Поворот (Вид сбоку)")]
-    [SerializeField] private Transform spineBone;
-    [SerializeField] private Vector3 rotationOffset = new Vector3(0, 90, 0); // Подберите под вашу модель
+    private int topLayerIndex;
+    private bool isAiming;
 
     void Start()
     {
@@ -32,118 +27,108 @@ public class PlayerShooting : MonoBehaviour
         mainCam = Camera.main;
         movementScript = GetComponent<PlayerSideController>();
         topLayerIndex = anim.GetLayerIndex("TopLayer");
-
-        if (audioSource == null) audioSource = GetComponent<AudioSource>();
     }
 
     void Update()
     {
-        HandleInput();
-        UpdateLayers();
-        HandleFaceDirection(); // Поворот лица к мышке
-    }
+        if (movementScript == null) return;
 
-    // LateUpdate критически важен для ручного поворота костей поверх анимации
-    void LateUpdate()
-    {
-        if (isAiming && spineBone != null)
-        {
-            RotateSpineTowardsMouse();
-        }
-    }
-
-    void HandleInput()
-    {
-        // Прицеливание на ПКМ
-        isAiming = Input.GetMouseButton(1);
+        isAiming = movementScript.IsAiming;
         anim.SetBool("isAiming", isAiming);
 
-        // Стрельба на ЛКМ (только если целимся)
-        if (isAiming && Input.GetMouseButton(0) && Time.time >= nextFireTime)
+        if (isAiming && Input.GetMouseButtonDown(0) && Time.time >= nextFireTime)
         {
             Shoot();
             nextFireTime = Time.time + fireRate;
         }
+
+        UpdateLayers();
     }
 
-    void Shoot()
+    void LateUpdate()
     {
-        anim.SetTrigger("Shoot");
+        // Вращаем руку в LateUpdate, чтобы анимация её не перебивала
+        if (isAiming && armBone != null)
+        {
+            RotateArmTowardsMouse();
+        }
+    }
 
-        if (audioSource && shootSound)
-            audioSource.PlayOneShot(shootSound);
+    private void RotateArmTowardsMouse()
+    {
+        Vector3 targetWorldPos = GetMouseWorldPosition();
 
-        // Рассчитываем направление в плоскости (без Z)
-        Vector3 targetPoint = GetMouseWorldPosition();
-        Vector3 shootDir = (targetPoint - firePoint.position).normalized;
+        // Вектор от плеча до точки мыши в мире
+        Vector3 aimDirection = targetWorldPos - armBone.position;
+
+        // КРИТИЧЕСКИ ВАЖНО: обнуляем Z разницу. 
+        // Пуля и рука должны двигаться только в плоскости X-Y.
+        aimDirection.z = 0;
+
+        if (aimDirection != Vector3.zero)
+        {
+            Quaternion targetRot = Quaternion.LookRotation(aimDirection);
+            // Применяем вращение плеча
+            armBone.rotation = Quaternion.Slerp(
+                armBone.rotation,
+                targetRot * Quaternion.Euler(armRotationOffset),
+                Time.deltaTime * rotationSpeed
+            );
+        }
+    }
+
+    private void Shoot()
+    {
+        if (bulletPrefab == null || firePoint == null) return;
+
+        Vector3 targetWorldPos = GetMouseWorldPosition();
+        // Направление полета: строго от дула к точке прицеливания
+        Vector3 shootDir = (targetWorldPos - firePoint.position).normalized;
+
+        // Гарантируем, что пуля не полетит "вглубь" (по Z)
         shootDir.z = 0;
 
-        // Создаем пулю
-        GameObject bullet = Instantiate(bulletPrefab, firePoint.position, Quaternion.LookRotation(shootDir));
+        GameObject bullet = Instantiate(bulletPrefab, firePoint.position, Quaternion.identity);
+
+        // Поворачиваем пулю «носом» по направлению полета
+        bullet.transform.right = shootDir;
 
         Rigidbody rb = bullet.GetComponent<Rigidbody>();
-        if (rb)
+        if (rb != null)
         {
-            rb.AddForce(shootDir * bulletForce, ForceMode.Impulse);
+            rb.velocity = shootDir * bulletForce;
         }
+
+        Destroy(bullet, 5f);
     }
 
-    void RotateSpineTowardsMouse()
-    {
-        Vector3 targetPoint = GetMouseWorldPosition();
-        Vector3 direction = targetPoint - spineBone.position;
-        direction.z = 0; // Игнорируем глубину для вида сбоку
-
-        if (direction != Vector3.zero)
-        {
-            // Находим нужный поворот
-            Quaternion targetRot = Quaternion.LookRotation(direction);
-            // Накладываем смещение, чтобы руки смотрели правильно
-            spineBone.rotation = targetRot * Quaternion.Euler(rotationOffset);
-        }
-    }
-
-    // Поворачивает всё тело персонажа (влево/вправо) в зависимости от положения мыши
-    void HandleFaceDirection()
-    {
-        if (!isAiming) return;
-
-        Vector3 mousePos = GetMouseWorldPosition();
-
-        // Если мышь правее персонажа
-        if (mousePos.x > transform.position.x)
-        {
-            // Поворачиваем вправо (угол 90 взят из вашего PlayerSideController)
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, 90f, 0), Time.deltaTime * 15f);
-        }
-        // Если мышь левее персонажа
-        else if (mousePos.x < transform.position.x)
-        {
-            // Поворачиваем влево (угол 270 взят из вашего PlayerSideController)
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, 270f, 0), Time.deltaTime * 15f);
-        }
-    }
-
-    // Вспомогательный метод для определения точной точки клика в 2D плоскости
     private Vector3 GetMouseWorldPosition()
     {
+        // Создаем луч из камеры в точку мыши
         Ray ray = mainCam.ScreenPointToRay(Input.mousePosition);
-        // Создаем плоскость на оси Z персонажа
-        Plane groundPlane = new Plane(Vector3.forward, new Vector3(0, 0, transform.position.z));
 
-        if (groundPlane.Raycast(ray, out float distance))
+        // Плоскость, проходящая через персонажа (Z = его позиция)
+        // Направлена вперед (Vector3.forward), значит сама плоскость вертикальная
+        Plane aimPlane = new Plane(Vector3.forward, new Vector3(0, 0, transform.position.z));
+
+        if (aimPlane.Raycast(ray, out float distance))
         {
-            return ray.GetPoint(distance);
+            Vector3 hitPoint = ray.GetPoint(distance);
+            // Принудительно ставим Z игрока, чтобы избежать погрешностей
+            hitPoint.z = transform.position.z;
+            return hitPoint;
         }
-        return transform.position + transform.right;
+
+        // Если луч почему-то не попал (камера смотрит параллельно плоскости),
+        // стреляем просто перед собой
+        return transform.position + transform.right * 10f;
     }
 
-    void UpdateLayers()
+    private void UpdateLayers()
     {
         if (topLayerIndex == -1) return;
-
         float targetWeight = isAiming ? 1f : 0f;
         float currentWeight = anim.GetLayerWeight(topLayerIndex);
-        anim.SetLayerWeight(topLayerIndex, Mathf.Lerp(currentWeight, targetWeight, Time.deltaTime * aimLayerWeightSpeed));
+        anim.SetLayerWeight(topLayerIndex, Mathf.Lerp(currentWeight, targetWeight, Time.deltaTime * 10f));
     }
 }

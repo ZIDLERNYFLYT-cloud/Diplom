@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using System.Collections;
 
 public class PlayerSideController : MonoBehaviour
 {
@@ -17,7 +18,7 @@ public class PlayerSideController : MonoBehaviour
 
     [Header("Анимации")]
     [SerializeField] private Animator animator;
-    [SerializeField] private float minFallDistance = 1.5f; // Минимальное расстояние падения для активации анимации
+    [SerializeField] private float minFallDistance = 1.5f;
 
     [Header("Проверка земли")]
     [SerializeField] public LayerMask groundLayer;
@@ -39,42 +40,33 @@ public class PlayerSideController : MonoBehaviour
     [Range(0, 1)][SerializeField] private float volume = 0.5f;
     [SerializeField] private float pitchRange = 0.2f;
 
+    [Header("Доступные способности")]
+    [SerializeField] private bool canJump = false;
+
+    [Header("Ссылки")]
+    [SerializeField] private CharacterFootsteps footstepScript;
+
+    // Публичные свойства для других скриптов
+    public bool IsAiming { get; private set; }
+    public bool CanMove { get; private set; } = true;
+
+    // Приватные переменные
     private Rigidbody rb;
     private float horizontalInput;
     private bool facingRight = true;
     private Quaternion targetRotation;
     private bool wasGrounded;
-
-    [Header("Звуки")]
-    [SerializeField] private CharacterFootsteps footstepScript;
-
     private float coyoteTimeCounter;
     private float jumpBufferCounter;
     private bool isGrounded;
     private float lastJumpTime;
-
-    // Для отслеживания состояния падения
     private bool wasFalling;
-    private float fallStartHeight; // Высота на которой началось падение
-    private float currentFallDistance; // Текущее пройденное расстояние падения
-
-    [Header("Доступные способности")]
-    [SerializeField] private bool canJump = false; // По умолчанию прыжок закрыт
-    private float lockedZ; // Переменная для хранения Z
-
-
-    [Header("Стрельба и Прицеливание")]
-    private bool isAiming;
-    [SerializeField] private float aimLayerWeightSpeed = 5f;
+    private float fallStartHeight;
+    private float currentFallDistance;
+    private float lockedZ;
+    private bool isMovementLocked = false;
     private int topLayerIndex;
 
-    private void Start()
-    {
-        lockedZ = transform.position.z;
-        topLayerIndex = animator.GetLayerIndex("TopLayer"); // Убедитесь, что слой в аниматоре называется так
-    }
-
-    
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -84,34 +76,35 @@ public class PlayerSideController : MonoBehaviour
 
         targetRotation = Quaternion.Euler(0f, 90f, 0f);
         transform.rotation = targetRotation;
+        lockedZ = transform.position.z;
+
+        topLayerIndex = animator.GetLayerIndex("TopLayer");
     }
 
     private void Update()
-
-
     {
+        // Проверка земли
         wasGrounded = isGrounded;
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
 
-        // --- ЛОГИКА ПРИЦЕЛИВАНИЯ И СТРЕЛЬБЫ ---
-        isAiming = Input.GetMouseButton(1); // Зажата ПКМ
-        animator.SetBool("isAiming", isAiming);
+        // Логика прицеливания
+        IsAiming = Input.GetMouseButton(1);
+        animator.SetBool("isAiming", IsAiming);
+
+        // Обновление веса слоя анимации
         UpdateAimLayerWeight();
 
-        if (Time.time >= nextAttackTime)
+        // Ввод движения (блокируется при прицеливании или блокировке)
+        if (CanMove && !isMovementLocked && !IsAiming)
         {
-            // Добавляем проверку: !Input.GetMouseButton(1)
-            if (Input.GetMouseButton(0) && !Input.GetMouseButton(1))
-            {
-                Attack();
-            }
+            horizontalInput = Input.GetAxisRaw("Horizontal");
         }
-        // ---------------------------------------
+        else
+        {
+            horizontalInput = 0f;
+        }
 
-        // 2. Ввод данных движения
-        horizontalInput = Input.GetAxisRaw("Horizontal");
-
-        // 3. Таймеры прыжка и койота
+        // Таймеры прыжка
         if (Input.GetButtonDown("Jump"))
             jumpBufferCounter = jumpBufferTime;
         else
@@ -122,53 +115,67 @@ public class PlayerSideController : MonoBehaviour
         else
             coyoteTimeCounter -= Time.deltaTime;
 
+        // Звук приземления
         if (isGrounded && !wasGrounded && Time.time - lastJumpTime > 0.2f)
         {
-            if (footstepScript != null) footstepScript.PlayJumpOrLandSound();
+            if (footstepScript != null)
+                footstepScript.PlayJumpOrLandSound();
         }
 
-        // 4. Логика прыжка
-        
-        if (canJump && jumpBufferCounter > 0 && coyoteTimeCounter > 0) // Добавили canJump
+        // Логика прыжка
+        if (canJump && jumpBufferCounter > 0 && coyoteTimeCounter > 0)
         {
             ApplyJump();
         }
 
-        // 5. Поворот персонажа
-        HandleRotation();
+        // Атака
+        if (Time.time >= nextAttackTime)
+        {
+            if (Input.GetMouseButton(0) && !Input.GetMouseButton(1))
+            {
+                Attack();
+            }
+        }
 
-        // 6. Управление анимациями
+        // Поворот персонажа (только когда не прицеливаемся)
+        if (!IsAiming)
+        {
+            HandleRotation();
+        }
+
+        // Анимации
         UpdateAnimations();
 
-        // 7. Отслеживание падения для анимации
+        // Отслеживание падения
         CheckFallingState();
-
-        
     }
 
+    private void FixedUpdate()
+    {
+        // Движение (блокируется при прицеливании или блокировке)
+        if (!isMovementLocked && !IsAiming && CanMove)
+        {
+            float targetSpeed = horizontalInput * moveSpeed;
+            float speedDiff = targetSpeed - rb.velocity.x;
+            float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
+            float movement = speedDiff * accelRate * Time.fixedDeltaTime;
+
+            rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
+        }
+    }
 
     private void UpdateAimLayerWeight()
     {
         if (topLayerIndex == -1) return;
 
-        float targetWeight = isAiming ? 1f : 0f;
+        float targetWeight = IsAiming ? 1f : 0f;
         float currentWeight = animator.GetLayerWeight(topLayerIndex);
-        float newWeight = Mathf.Lerp(currentWeight, targetWeight, Time.deltaTime * aimLayerWeightSpeed);
+        float newWeight = Mathf.Lerp(currentWeight, targetWeight, Time.deltaTime * 5f);
         animator.SetLayerWeight(topLayerIndex, newWeight);
     }
 
-
-    private void Shoot()
-    {
-        animator.SetTrigger("Shoot");
-        nextAttackTime = Time.time + attackRate;
-
-        // Здесь ваша логика Raycast или спавна пули
-        Debug.Log("Выстрел!");
-    }
     private void CheckFallingState()
     {
-        // Если на земле — сбрасываем всё
         if (isGrounded)
         {
             if (wasFalling || animator.GetBool("IsFalling"))
@@ -180,7 +187,6 @@ public class PlayerSideController : MonoBehaviour
             return;
         }
 
-        // Если в воздухе и летим вниз
         if (rb.velocity.y < -0.5f)
         {
             if (!wasFalling)
@@ -193,7 +199,6 @@ public class PlayerSideController : MonoBehaviour
             {
                 currentFallDistance = fallStartHeight - transform.position.y;
 
-                // Включаем анимацию только один раз при достижении дистанции
                 if (currentFallDistance >= minFallDistance && !animator.GetBool("IsFalling"))
                 {
                     animator.SetBool("IsFalling", true);
@@ -215,18 +220,20 @@ public class PlayerSideController : MonoBehaviour
                 enemyAI.TakeDamage(attackDamage);
             }
 
-            audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
-            audioSource.PlayOneShot(kickSound, volume);
+            if (audioSource != null && kickSound != null)
+            {
+                audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+                audioSource.PlayOneShot(kickSound, volume);
+            }
         }
     }
 
     private void Attack()
     {
-        // Блокируем движение во время удара (опционально, как в вашем коде)
+        StartCoroutine(MovementLockCoroutine(0.5f));
         rb.velocity = new Vector3(0, rb.velocity.y, 0);
 
         comboStep = (comboStep == 1) ? 2 : 1;
-
         animator.SetInteger("AttackType", comboStep);
         animator.SetTrigger("Attack");
 
@@ -237,13 +244,13 @@ public class PlayerSideController : MonoBehaviour
     {
         rb.velocity = new Vector3(rb.velocity.x, jumpForce, rb.velocity.z);
 
-        // Сбрасываем флаг падения при прыжке вверх
         wasFalling = false;
         currentFallDistance = 0f;
         animator.SetBool("IsFalling", false);
         animator.SetBool("IsJumping", true);
 
-        if (footstepScript != null) footstepScript.PlayTakeoffSound();
+        if (footstepScript != null)
+            footstepScript.PlayTakeoffSound();
 
         jumpBufferCounter = 0f;
         coyoteTimeCounter = 0f;
@@ -252,17 +259,14 @@ public class PlayerSideController : MonoBehaviour
 
     private void UpdateAnimations()
     {
-        // Анимация бега
         float animSpeed = isGrounded ? Mathf.Abs(horizontalInput) : 0f;
         animator.SetFloat("Speed", animSpeed);
 
-        // Логика прыжка (взлет)
         if (!isGrounded && rb.velocity.y > 0.5f)
         {
             animator.SetBool("IsJumping", true);
         }
 
-        // Приземление: сброс прыжка
         if (isGrounded && animator.GetBool("IsJumping"))
         {
             animator.SetBool("IsJumping", false);
@@ -295,14 +299,17 @@ public class PlayerSideController : MonoBehaviour
         );
     }
 
-    private void FixedUpdate()
+    private IEnumerator MovementLockCoroutine(float duration)
     {
-        float targetSpeed = horizontalInput * moveSpeed;
-        float speedDiff = targetSpeed - rb.velocity.x;
-        float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
-        float movement = speedDiff * accelRate * Time.fixedDeltaTime;
+        isMovementLocked = true;
+        yield return new WaitForSeconds(duration);
+        isMovementLocked = false;
+    }
 
-        rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
+    // Публичный метод для временной блокировки движения из других скриптов
+    public void LockMovement(float duration)
+    {
+        StartCoroutine(MovementLockCoroutine(duration));
     }
 
     private void OnDrawGizmosSelected()
