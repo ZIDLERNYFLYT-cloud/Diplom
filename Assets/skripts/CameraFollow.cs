@@ -6,10 +6,11 @@ public class CameraFollowe : MonoBehaviour
     [SerializeField] private Transform target;
     [SerializeField] private Vector3 offset = new Vector3(0f, 2f, -10f);
 
-    [Header("Поворот за мышкой (ПКМ)")]
-    [SerializeField] private float sensitivity = 3f;
-    [SerializeField] private float xLimit = 20f;
-    [SerializeField] private float yLimit = 30f;
+    [Header("Смещение за мышью (ПКМ)")]
+    [SerializeField] private float mouseOffsetFactor = 5f; // Насколько сильно камера тянется к мыши
+    [SerializeField] private float followSmoothness = 10f; // Плавность следования
+
+    
 
     private float rotationX = 0f;
     private float rotationY = 0f;
@@ -19,7 +20,6 @@ public class CameraFollowe : MonoBehaviour
     {
         if (target != null)
         {
-            // Устанавливаем позицию сразу
             transform.position = target.position + offset;
         }
         originalRotation = transform.rotation;
@@ -29,33 +29,30 @@ public class CameraFollowe : MonoBehaviour
     {
         if (target == null) return;
 
-        // ВОЗВРАЩАЕМ СТАРУЮ ЛОГИКУ: Жесткая привязка позиции без Lerp
-        // Это убирает микро-тряску (джиттер)
-        transform.position = target.position + offset;
+        Vector3 targetCameraPos;
 
-        // Оставляем логику поворота
-        HandleMouseLook();
+        // Если зажата ПКМ — камера смещается к курсору
+        //if (Input.GetMouseButton(1))
+        //{
+        //    // Получаем положение мыши в процентах от экрана (от -0.5 до 0.5)
+        //    Vector3 mouseViewportPos = Camera.main.ScreenToViewportPoint(Input.mousePosition);
+        //    Vector3 mouseInfluence = new Vector3(mouseViewportPos.x - 0.5f, mouseViewportPos.y - 0.5f, 0);
+
+        //    // Смещение: Позиция цели + базовый оффсет + влияние мыши
+        //    // Если вы хотите, чтобы центр был ПРЯМО на курсоре, увеличьте mouseOffsetFactor
+        //    targetCameraPos = target.position + offset + (mouseInfluence * mouseOffsetFactor * 2f);
+        //}
+        //else
+        //{
+        // Если ПКМ не нажата — просто жестко следует за игроком
+        targetCameraPos = target.position + offset;
+        //}
+
+        //// Используем Lerp, чтобы камера не прыгала мгновенно при нажатии кнопки
+        transform.position = Vector3.Lerp(transform.position, targetCameraPos, Time.deltaTime * followSmoothness);
+
+
     }
 
-    private void HandleMouseLook()
-    {
-        if (Input.GetMouseButton(1))
-        {
-            rotationY += Input.GetAxis("Mouse X") * sensitivity;
-            rotationX -= Input.GetAxis("Mouse Y") * sensitivity;
-
-            rotationX = Mathf.Clamp(rotationX, -xLimit, xLimit);
-            rotationY = Mathf.Clamp(rotationY, -yLimit, yLimit);
-
-            Quaternion rotationOffset = Quaternion.Euler(rotationX, rotationY, 0);
-            // Поворот можно оставить плавным (Slerp), он не вызывает тряску позиции
-            transform.rotation = Quaternion.Slerp(transform.rotation, originalRotation * rotationOffset, Time.deltaTime * 10f);
-        }
-        else
-        {
-            transform.rotation = Quaternion.Slerp(transform.rotation, originalRotation, Time.deltaTime * 5f);
-            rotationX = Mathf.Lerp(rotationX, 0, Time.deltaTime * 5f);
-            rotationY = Mathf.Lerp(rotationY, 0, Time.deltaTime * 5f);
-        }
-    }
+    
 }

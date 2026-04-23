@@ -39,12 +39,33 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private AudioSource audioSource;
     [Range(0, 1)][SerializeField] private float volume = 0.5f;
     [SerializeField] private float pitchRange = 0.2f;
+    [SerializeField] private AudioClip DashSound;
+    
 
     [Header("Доступные способности")]
     [SerializeField] private bool canJump = false;
 
     [Header("Ссылки")]
     [SerializeField] private CharacterFootsteps footstepScript;
+
+    [Header("Рывок и Бег")]
+    [SerializeField] private float dashForce = 20f;
+    [SerializeField] private float dashDuration = 0.2f;
+    [SerializeField] private float sprintSpeedMultiplier = 1.6f;
+    [SerializeField] private float sprintThreshold = 0.2f; // Время зажатия для перехода в бег
+    [SerializeField] private Color sprintColor = Color.blue;
+    [SerializeField] private Renderer characterRenderer; // Ссылка на MeshRenderer модели
+
+    [Header("Настройки силы рывка")]
+    [SerializeField] private float dashForceHorizontal = 15f; // Сила для WASD
+    [SerializeField] private float dashForceVertical = 20f;   // Сила для прыжка вверх
+
+    private bool isDashing = false;
+    private bool isSprinting = false;
+    private float shiftPressTime = 0f;
+    private Color originalColor;
+    private Material charMaterial;
+
 
     // Публичные свойства для других скриптов
     public bool IsAiming { get; private set; }
@@ -66,43 +87,53 @@ public class PlayerSideController : MonoBehaviour
     private float lockedZ;
     private bool isMovementLocked = false;
     private int topLayerIndex;
+    private Camera mainCam;
+
+    private void Start()
+    {
+        mainCam = Camera.main;
+    }
 
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
+        if (animator == null) animator = GetComponent<Animator>();
 
-        if (animator == null)
-            animator = GetComponent<Animator>();
+        // Работа с цветом
+        if (characterRenderer != null)
+        {
+            charMaterial = characterRenderer.material;
+            originalColor = charMaterial.color;
+        }
 
         targetRotation = Quaternion.Euler(0f, 90f, 0f);
         transform.rotation = targetRotation;
         lockedZ = transform.position.z;
-
         topLayerIndex = animator.GetLayerIndex("TopLayer");
     }
 
     private void Update()
     {
+        HandleSprintAndDash();
+
         // Проверка земли
         wasGrounded = isGrounded;
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
 
         // Логика прицеливания
-        IsAiming = Input.GetMouseButton(1);
-        animator.SetBool("isAiming", IsAiming);
+        //IsAiming = Input.GetMouseButton(1);
+        //animator.SetBool("isAiming", IsAiming);
 
         // Обновление веса слоя анимации
         UpdateAimLayerWeight();
 
         // Ввод движения (блокируется при прицеливании или блокировке)
-        if (CanMove && !isMovementLocked && !IsAiming)
+        if (CanMove && !isMovementLocked && !IsAiming && !isDashing)
         {
             horizontalInput = Input.GetAxisRaw("Horizontal");
         }
-        else
-        {
-            horizontalInput = 0f;
-        }
+        else if (isDashing) { /* не меняем horizontalInput */ }
+        else { horizontalInput = 0f; }
 
         // Таймеры прыжка
         if (Input.GetButtonDown("Jump"))
@@ -128,6 +159,13 @@ public class PlayerSideController : MonoBehaviour
             ApplyJump();
         }
 
+        // В Update() вашего PlayerSideController:
+        if (Input.GetMouseButtonDown(1)) // Например, выстрел на ПКМ
+        {
+            animator.SetTrigger("shoot");
+            // Больше ничего делать не нужно — анимация сама вызовет ShootEvent
+        }
+
         // Атака
         if (Time.time >= nextAttackTime)
         {
@@ -138,10 +176,10 @@ public class PlayerSideController : MonoBehaviour
         }
 
         // Поворот персонажа (только когда не прицеливаемся)
-        if (!IsAiming)
-        {
+        //if (!IsAiming)
+        //{
             HandleRotation();
-        }
+        //}
 
         // Анимации
         UpdateAnimations();
@@ -150,12 +188,100 @@ public class PlayerSideController : MonoBehaviour
         CheckFallingState();
     }
 
+    private void HandleSprintAndDash()
+    {
+        if (Input.GetKeyDown(KeyCode.LeftShift))
+        {
+            shiftPressTime = Time.time;
+            // Сразу запускаем рывок при нажатии
+            if (!isDashing)
+            {
+                StartCoroutine(DashRoutine());
+            }
+        }
+
+        if (Input.GetKey(KeyCode.LeftShift))
+        {
+            // Если удерживаем дольше порога — переходим в бег
+            if (Time.time - shiftPressTime > sprintThreshold && !isSprinting)
+            {
+                StartSprint();
+            }
+        }
+
+        if (Input.GetKeyUp(KeyCode.LeftShift))
+        {
+            StopSprint();
+        }
+    }
+
+    private IEnumerator DashRoutine()
+    {
+        isDashing = true;
+        animator.SetTrigger("Dash");
+
+        audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+        audioSource.PlayOneShot(DashSound, volume);
+
+        if (charMaterial) charMaterial.color = sprintColor;
+
+        float vInput = Input.GetAxisRaw("Vertical");
+        float hInput = Input.GetAxisRaw("Horizontal");
+
+        // Считаем направление
+        Vector3 dashDirection = new Vector3(hInput, vInput, 0f).normalized;
+        if (dashDirection == Vector3.zero)
+            dashDirection = facingRight ? Vector3.right : Vector3.left;
+
+        // ОБНУЛЯЕМ скорость перед рывком, чтобы результат всегда был предсказуемым
+        rb.velocity = Vector3.zero;
+
+        // Применяем разную силу для разных осей
+        float finalDashForceX = dashDirection.x * dashForceHorizontal;
+        float finalDashForceY = dashDirection.y * dashForceVertical;
+
+        rb.velocity = new Vector3(finalDashForceX, finalDashForceY, 0f);
+
+        // Временно отключаем гравитацию, чтобы персонаж летел ровно по вектору
+        rb.useGravity = false;
+
+        yield return new WaitForSeconds(dashDuration);
+
+        // Возвращаем гравитацию и сбрасываем состояние
+        rb.useGravity = true;
+        isDashing = false;
+
+        
+            charMaterial.color = originalColor;
+    }
+
+    private void StartSprint()
+    {
+        isSprinting = true;
+        // Если мы уже бежим, убеждаемся, что цвет синий
+        if (charMaterial) charMaterial.color = originalColor;
+        animator.SetBool("IsSprinting", true);
+    }
+
+    private void StopSprint()
+    {
+        isSprinting = false;
+        // Возвращаем цвет, только если не идет процесс рывка
+        if (!isDashing && charMaterial)
+        {
+            charMaterial.color = originalColor;
+        }
+        animator.SetBool("IsSprinting", false);
+    }
+
     private void FixedUpdate()
     {
-        // Движение (блокируется при прицеливании или блокировке)
-        if (!isMovementLocked && !IsAiming && CanMove)
+        if (!isMovementLocked && !IsAiming && CanMove && !isDashing)
         {
-            float targetSpeed = horizontalInput * moveSpeed;
+            // Модифицируем скорость если бежим
+            float currentMaxSpeed = isSprinting ? moveSpeed * sprintSpeedMultiplier : moveSpeed;
+
+            float targetSpeed = horizontalInput * currentMaxSpeed;
             float speedDiff = targetSpeed - rb.velocity.x;
             float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
             float movement = speedDiff * accelRate * Time.fixedDeltaTime;
@@ -259,8 +385,16 @@ public class PlayerSideController : MonoBehaviour
 
     private void UpdateAnimations()
     {
+
+
+        // Если бежим, увеличиваем значение Speed для перехода в анимацию бега (или используем IsSprinting)
+        
+
         float animSpeed = isGrounded ? Mathf.Abs(horizontalInput) : 0f;
         animator.SetFloat("Speed", animSpeed);
+
+        float speedMultiplier = isSprinting ? 2f : 1f;
+        animator.SetFloat("Speed", animSpeed * speedMultiplier);
 
         if (!isGrounded && rb.velocity.y > 0.5f)
         {
@@ -281,15 +415,44 @@ public class PlayerSideController : MonoBehaviour
 
     private void HandleRotation()
     {
-        if (horizontalInput > 0.1f && !facingRight)
+        // Если прицеливаемся — разворачиваем персонажа корпусом в сторону центра экрана
+        if (IsAiming)
         {
-            facingRight = true;
-            targetRotation = Quaternion.Euler(0f, 90f, 0f);
+            // Находим центр экрана в мире
+            Ray ray = mainCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
+            Plane plane = new Plane(Vector3.forward, new Vector3(0, 0, transform.position.z));
+
+            if (plane.Raycast(ray, out float dist))
+            {
+                Vector3 centerPoint = ray.GetPoint(dist);
+
+                // Если центр экрана справа от персонажа — смотрим вправо
+                if (centerPoint.x > transform.position.x && !facingRight)
+                {
+                    facingRight = true;
+                    targetRotation = Quaternion.Euler(0f, 90f, 0f);
+                }
+                // Если слева — смотрим влево
+                else if (centerPoint.x < transform.position.x && facingRight)
+                {
+                    facingRight = false;
+                    targetRotation = Quaternion.Euler(0f, 270f, 0f);
+                }
+            }
         }
-        else if (horizontalInput < -0.1f && facingRight)
+        // Если не прицеливаемся — стандартный поворот по кнопкам движения
+        else
         {
-            facingRight = false;
-            targetRotation = Quaternion.Euler(0f, 270f, 0f);
+            if (horizontalInput > 0.1f && !facingRight)
+            {
+                facingRight = true;
+                targetRotation = Quaternion.Euler(0f, 90f, 0f);
+            }
+            else if (horizontalInput < -0.1f && facingRight)
+            {
+                facingRight = false;
+                targetRotation = Quaternion.Euler(0f, 270f, 0f);
+            }
         }
 
         transform.rotation = Quaternion.Slerp(
