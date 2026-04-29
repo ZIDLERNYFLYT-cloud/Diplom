@@ -25,6 +25,8 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] public Transform groundCheck;
     [SerializeField] private float groundCheckRadius = 0.25f;
 
+    [SerializeField] private float wallCheckDistance = 0.1f;
+
     [Header("Атака")]
     [SerializeField] private Transform attackPoint;
     [SerializeField] private float attackRange = 0.8f;
@@ -59,6 +61,14 @@ public class PlayerSideController : MonoBehaviour
     [Header("Настройки силы рывка")]
     [SerializeField] private float dashForceHorizontal = 15f; // Сила для WASD
     [SerializeField] private float dashForceVertical = 20f;   // Сила для прыжка вверх
+
+    [Header("Приседание")]
+    [SerializeField] private float crouchSpeedMultiplier = 0.5f;
+    [SerializeField] private float crouchColliderHeight = 0.5f; // Высота коллайдера при приседе
+    private float originalColliderHeight;
+    private Vector3 originalColliderCenter;
+    [SerializeField]  public CapsuleCollider playerCollider;
+    private bool isCrouching = false;
 
     private bool isDashing = false;
     private bool isSprinting = false;
@@ -97,6 +107,17 @@ public class PlayerSideController : MonoBehaviour
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
+        playerCollider = GetComponent<CapsuleCollider>(); // Берем коллайдер
+
+        if (playerCollider != null)
+        {
+            originalColliderHeight = playerCollider.height;
+            originalColliderCenter = playerCollider.center;
+        }
+
+        if (animator == null) animator = GetComponent<Animator>();
+
+        rb = GetComponent<Rigidbody>();
         if (animator == null) animator = GetComponent<Animator>();
 
         // Работа с цветом
@@ -114,6 +135,8 @@ public class PlayerSideController : MonoBehaviour
 
     private void Update()
     {
+        HandleCrouch();
+
         HandleSprintAndDash();
 
         // Проверка земли
@@ -188,6 +211,72 @@ public class PlayerSideController : MonoBehaviour
         CheckFallingState();
     }
 
+    private void HandleCrouch()
+    {
+        // Приседаем только если на земле
+        if (isGrounded)
+        {
+            if (Input.GetKey(KeyCode.LeftControl))
+            {
+                if (!isCrouching)
+                {
+                    isCrouching = true;
+                    UpdateCollider();
+                }
+            }
+            else
+            {
+                if (isCrouching)
+                {
+                    // Проверка: нет ли над головой потолка?
+                    // Пускаем луч чуть выше головы. 
+                    // Вычитаем groundLayer из проверки, чтобы не попадать в самого себя, 
+                    // либо используйте отступ от центра.
+                    bool headBlocked = Physics.Raycast(transform.position + Vector3.up * 0.5f, Vector3.up, 1.5f, groundLayer);
+
+                    
+                        
+                        UpdateCollider();
+                    
+                }
+            }
+        }
+        else if (isCrouching) // Если в воздухе - встаем автоматически
+        {
+            isCrouching = false;
+            UpdateCollider();
+        }
+    }
+
+    private void UpdateCollider()
+    {
+        // Если по какой-то причине ссылка пропала, пробуем найти снова
+        if (playerCollider == null) playerCollider = GetComponent<CapsuleCollider>();
+
+        if (playerCollider == null)
+        {
+            Debug.LogError("CapsuleCollider не найден на персонаже!");
+            return;
+        }
+
+        if (isCrouching)
+        {
+            playerCollider.height = crouchColliderHeight;
+
+            // Математически точное выравнивание по низу
+            float offset = (originalColliderHeight - crouchColliderHeight) / 2f;
+            playerCollider.center = new Vector3(originalColliderCenter.x, originalColliderCenter.y - offset, originalColliderCenter.z);
+
+            Debug.Log("Коллайдер УМЕНЬШЕН. Текущая высота: " + playerCollider.height);
+        }
+        else
+        {
+            playerCollider.height = originalColliderHeight;
+            playerCollider.center = originalColliderCenter;
+
+            Debug.Log("Коллайдер ВОССТАНОВЛЕН. Текущая высота: " + playerCollider.height);
+        }
+    }
     private void HandleSprintAndDash()
     {
         if (Input.GetKeyDown(KeyCode.LeftShift))
@@ -278,16 +367,56 @@ public class PlayerSideController : MonoBehaviour
     {
         if (!isMovementLocked && !IsAiming && CanMove && !isDashing)
         {
-            // Модифицируем скорость если бежим
-            float currentMaxSpeed = isSprinting ? moveSpeed * sprintSpeedMultiplier : moveSpeed;
+            // Считаем скорость с учетом приседа
+            float currentMaxSpeed = moveSpeed;
+            if (isSprinting) currentMaxSpeed *= sprintSpeedMultiplier;
+            if (isCrouching) currentMaxSpeed *= crouchSpeedMultiplier; // Замедляем на корточках
 
             float targetSpeed = horizontalInput * currentMaxSpeed;
+
+            // ... (ваша существующая логика проверки стен и AddForce) ...
+            float speedDiff = targetSpeed - rb.velocity.x;
+            float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
+            float movement = speedDiff * accelRate * Time.fixedDeltaTime;
+            rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
+        }
+        transform.position = new Vector3(transform.position.x, transform.position.y, lockedZ);
+
+        if (!isMovementLocked && !IsAiming && CanMove && !isDashing)
+        {
+            // 1. Считаем целевую скорость
+            float currentMaxSpeed = isSprinting ? moveSpeed * sprintSpeedMultiplier : moveSpeed;
+            float targetSpeed = horizontalInput * currentMaxSpeed;
+
+            // 2. ПРОВЕРКА СТЕНЫ (Raycast)
+            if (Mathf.Abs(horizontalInput) > 0.01f)
+            {
+                // Пускаем 3 луча (у колен, у пояса, у головы), чтобы точно поймать стену
+                bool hittingWall =
+                    Physics.Raycast(transform.position + Vector3.up * 0.2f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
+                    Physics.Raycast(transform.position + Vector3.up * 1f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
+                    Physics.Raycast(transform.position + Vector3.up * 1.8f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer);
+
+                if (hittingWall)
+                {
+                    // Если стена впереди, обнуляем целевую скорость только в сторону стены
+                    targetSpeed = 0;
+
+                    // Дополнительно: мягко обнуляем текущую горизонтальную скорость Rigidbody
+                    rb.velocity = new Vector3(0, rb.velocity.y, 0);
+                }
+            }
+
+            // 3. Прикладываем силу
             float speedDiff = targetSpeed - rb.velocity.x;
             float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
             float movement = speedDiff * accelRate * Time.fixedDeltaTime;
 
             rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
         }
+
+        // Принудительная фиксация Z (чтобы не вылетал из плоскости при ударах)
+        transform.position = new Vector3(transform.position.x, transform.position.y, lockedZ);
     }
 
     private void UpdateAimLayerWeight()
@@ -385,15 +514,37 @@ public class PlayerSideController : MonoBehaviour
 
     private void UpdateAnimations()
     {
+        animator.SetBool("IsCrouching", isCrouching);
 
+        float moveMagnitude = Mathf.Abs(horizontalInput);
+
+        // Обычная скорость для ходьбы/бега
+        float animSpeed = isGrounded ? moveMagnitude : 0f;
+        float speedMultiplier = isSprinting ? 2f : 1f;
+        animator.SetBool("IsCrouching", isGrounded && isCrouching);
+        animator.SetFloat("Speed", moveMagnitude * (isSprinting ? 2f : 1f));
+
+        animator.SetFloat("Speed", animSpeed * speedMultiplier);
+
+        // Логика корточек
+        animator.SetBool("IsCrouching", isCrouching);
+
+        // Логика для корточек
+        if (isCrouching)
+        {
+            // Если стоим - скорость анимации 0 (пауза на 1 кадре)
+            // Если идем - скорость 1 (анимация играет)
+            float crouchAnimSpeed = (moveMagnitude > 0.01f) ? 1.0f : 0.0f;
+            animator.SetFloat("CrouchSpeed", crouchAnimSpeed);
+        }
 
         // Если бежим, увеличиваем значение Speed для перехода в анимацию бега (или используем IsSprinting)
-        
 
-        float animSpeed = isGrounded ? Mathf.Abs(horizontalInput) : 0f;
+
+        //float animSpeed = isGrounded ? Mathf.Abs(horizontalInput) : 0f;
         animator.SetFloat("Speed", animSpeed);
 
-        float speedMultiplier = isSprinting ? 2f : 1f;
+        //float speedMultiplier = isSprinting ? 2f : 1f;
         animator.SetFloat("Speed", animSpeed * speedMultiplier);
 
         if (!isGrounded && rb.velocity.y > 0.5f)
