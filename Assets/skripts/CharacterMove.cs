@@ -12,6 +12,7 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float jumpForce = 13f;
     [SerializeField] private float coyoteTime = 0.12f;
     [SerializeField] private float jumpBufferTime = 0.15f;
+    [SerializeField] private float lowJumpMultiplier = 3f; // Насколько быстро мы будем падать при коротком нажатииы
 
     [Header("Поворот")]
     [SerializeField] private float rotationSpeed = 12f;
@@ -64,7 +65,7 @@ public class PlayerSideController : MonoBehaviour
 
     [Header("Приседание")]
     [SerializeField] private float crouchSpeedMultiplier = 0.5f;
-    [SerializeField] private float crouchColliderHeight = 0.5f; // Высота коллайдера при приседе
+    [SerializeField] private float crouchColliderHeight = 0.7f; // Высота коллайдера при приседе
     private float originalColliderHeight;
     private Vector3 originalColliderCenter;
     [SerializeField]  public CapsuleCollider playerCollider;
@@ -224,20 +225,27 @@ public class PlayerSideController : MonoBehaviour
                     UpdateCollider();
                 }
             }
-            else
+            else // Клавиша Ctrl ОТПУЩЕНА
             {
                 if (isCrouching)
                 {
                     // Проверка: нет ли над головой потолка?
-                    // Пускаем луч чуть выше головы. 
-                    // Вычитаем groundLayer из проверки, чтобы не попадать в самого себя, 
-                    // либо используйте отступ от центра.
-                    bool headBlocked = Physics.Raycast(transform.position + Vector3.up * 0.5f, Vector3.up, 1.5f, groundLayer);
+                    // Пускаем луч вверх от центра персонажа. 
+                    // Расстояние луча должно быть равно разнице высот + небольшой запас.
+                    float checkDistance = originalColliderHeight - crouchColliderHeight + 0.2f;
+                    bool headBlocked = Physics.Raycast(transform.position + Vector3.up * crouchColliderHeight, Vector3.up, checkDistance, groundLayer);
 
-                    
-                        
+                    if (!headBlocked)
+                    {
+                        isCrouching = false;
                         UpdateCollider();
-                    
+                    }
+                    else
+                    {
+                        // Если потолок мешает, оставляем isCrouching = true
+                        // Персонаж встанет автоматически, как только выйдет из-под препятствия
+                        Debug.Log("Потолок мешает встать!");
+                    }
                 }
             }
         }
@@ -273,7 +281,7 @@ public class PlayerSideController : MonoBehaviour
         {
             playerCollider.height = originalColliderHeight;
             playerCollider.center = originalColliderCenter;
-
+            isCrouching = false;
             Debug.Log("Коллайдер ВОССТАНОВЛЕН. Текущая высота: " + playerCollider.height);
         }
     }
@@ -365,6 +373,8 @@ public class PlayerSideController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        ApplyVariableJumpHeight();
+
         if (!isMovementLocked && !IsAiming && CanMove && !isDashing)
         {
             // Считаем скорость с учетом приседа
@@ -417,6 +427,17 @@ public class PlayerSideController : MonoBehaviour
 
         // Принудительная фиксация Z (чтобы не вылетал из плоскости при ударах)
         transform.position = new Vector3(transform.position.x, transform.position.y, lockedZ);
+    }
+
+    private void ApplyVariableJumpHeight()
+    {
+        // Если мы летим ВВЕРХ, но при этом НЕ держим кнопку прыжка
+        if (rb.velocity.y > 0 && !Input.GetButton("Jump"))
+        {
+            // Применяем дополнительную силу тяжести, чтобы прыжок был коротким
+            // Physics.gravity.y * (lowJumpMultiplier - 1) — это добавочная гравитация
+            rb.velocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
+        }
     }
 
     private void UpdateAimLayerWeight()
