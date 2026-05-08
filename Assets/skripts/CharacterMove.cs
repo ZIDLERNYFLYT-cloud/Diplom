@@ -50,6 +50,7 @@ public class PlayerSideController : MonoBehaviour
 
     [Header("Ссылки")]
     [SerializeField] private CharacterFootsteps footstepScript;
+    [SerializeField] private GameObject Canvas;
 
     [Header("Рывок и Бег")]
     [SerializeField] private float dashForce = 20f;
@@ -103,6 +104,7 @@ public class PlayerSideController : MonoBehaviour
     private void Start()
     {
         mainCam = Camera.main;
+        Canvas.SetActive(true);
     }
 
     private void Awake()
@@ -439,6 +441,7 @@ public class PlayerSideController : MonoBehaviour
             rb.velocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
         }
     }
+
 
     private void UpdateAimLayerWeight()
     {
