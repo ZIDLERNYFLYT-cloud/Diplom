@@ -13,13 +13,15 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float coyoteTime = 0.12f;
     [SerializeField] private float jumpBufferTime = 0.15f;
     [SerializeField] private float lowJumpMultiplier = 3f; // Насколько быстро мы будем падать при коротком нажатииы
+    [SerializeField] private float minFallDistance = 1.5f; // Минимальная высота для обычной анимации падения
+    [SerializeField] private float longFallDistance = 7f; // !!! ПРЕДЕЛ ВЫСОТЫ, указываемый вручную !!!
 
     [Header("Поворот")]
     [SerializeField] private float rotationSpeed = 12f;
 
     [Header("Анимации")]
     [SerializeField] private Animator animator;
-    [SerializeField] private float minFallDistance = 1.5f;
+    
 
     [Header("Проверка земли")]
     [SerializeField] public LayerMask groundLayer;
@@ -64,6 +66,9 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float dashForceHorizontal = 15f; // Сила для WASD
     [SerializeField] private float dashForceVertical = 20f;   // Сила для прыжка вверх
 
+    [Header("Предсказание приземления")]
+    [SerializeField] private float landingCheckDistance = 2.0f; // Расстояние до земли для срабатывания анимации приземления
+
     [Header("Приседание")]
     [SerializeField] private float crouchSpeedMultiplier = 0.5f;
     [SerializeField] private float crouchColliderHeight = 0.7f; // Высота коллайдера при приседе
@@ -100,6 +105,7 @@ public class PlayerSideController : MonoBehaviour
     private bool isMovementLocked = false;
     private int topLayerIndex;
     private Camera mainCam;
+    
 
     private void Start()
     {
@@ -134,6 +140,10 @@ public class PlayerSideController : MonoBehaviour
         transform.rotation = targetRotation;
         lockedZ = transform.position.z;
         topLayerIndex = animator.GetLayerIndex("TopLayer");
+
+        wasFalling = false;
+        fallStartHeight = transform.position.y;
+        currentFallDistance = 0f;
     }
 
     private void Update()
@@ -455,18 +465,22 @@ public class PlayerSideController : MonoBehaviour
 
     private void CheckFallingState()
     {
+        // --- БЛОК ПРИЗЕМЛЕНИЯ (ФАКТИЧЕСКОЕ КАСАНИЕ) ---
         if (isGrounded)
         {
-            if (wasFalling || animator.GetBool("IsFalling"))
+            if (wasFalling || animator.GetBool("IsFalling") || animator.GetBool("IsLongFall"))
             {
                 wasFalling = false;
-                animator.SetBool("IsFalling", false);
                 currentFallDistance = 0f;
+                animator.SetBool("IsFalling", false);
+                animator.SetBool("IsLongFall", false);
+                animator.SetBool("IsJumping", false);
             }
             return;
         }
 
-        if (rb.velocity.y < -0.5f)
+        // --- БЛОК ПАДЕНИЯ (В ВОЗДУХЕ) ---
+        if (rb.velocity.y < -0.1f)
         {
             if (!wasFalling)
             {
@@ -481,7 +495,59 @@ public class PlayerSideController : MonoBehaviour
                 if (currentFallDistance >= minFallDistance && !animator.GetBool("IsFalling"))
                 {
                     animator.SetBool("IsFalling", true);
+                }
+
+                // Логика высокого падения
+                if (currentFallDistance >= longFallDistance && !animator.GetBool("IsLongFall"))
+                {
+                    animator.SetBool("IsLongFall", true);
                     animator.SetBool("IsJumping", false);
+                }
+
+                // --- НОВАЯ ЛОГИКА: ТРИГГЕР ПЕРЕД ЗЕМЛЕЙ ---
+                if (animator.GetBool("IsLongFall"))
+                {
+                    // Пускаем луч вниз от позиции groundCheck
+                    RaycastHit hit;
+                    if (Physics.Raycast(groundCheck.position, Vector3.down, out hit, landingCheckDistance, groundLayer))
+                    {
+                        // Если земля близко, активируем триггер приземления
+                        animator.SetTrigger("NearGround");
+                    }
+                }
+            }
+        }
+
+        if (!isGrounded && !wasFalling && rb.velocity.y < 0)
+        {
+            wasFalling = true;
+            fallStartHeight = transform.position.y;
+        }
+
+        if (wasFalling && rb.velocity.y < -0.1f)
+        {
+            currentFallDistance = fallStartHeight - transform.position.y;
+
+            // Обычное падение
+            if (currentFallDistance >= minFallDistance)
+            {
+                animator.SetBool("IsFalling", true);
+            }
+
+            // Высокое падение
+            if (currentFallDistance >= longFallDistance)
+            {
+                animator.SetBool("IsLongFall", true);
+                animator.SetBool("IsJumping", false);
+            }
+
+            // Предсказание земли для триггера приземления
+            if (animator.GetBool("IsLongFall"))
+            {
+                RaycastHit hit;
+                if (Physics.Raycast(groundCheck.position, Vector3.down, out hit, landingCheckDistance, groundLayer))
+                {
+                    animator.SetTrigger("NearGround");
                 }
             }
         }
@@ -526,6 +592,7 @@ public class PlayerSideController : MonoBehaviour
         wasFalling = false;
         currentFallDistance = 0f;
         animator.SetBool("IsFalling", false);
+        animator.SetBool("IsLongFall", false); 
         animator.SetBool("IsJumping", true);
 
         if (footstepScript != null)
