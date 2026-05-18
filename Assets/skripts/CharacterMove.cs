@@ -61,6 +61,9 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float sprintThreshold = 0.2f; // Время зажатия для перехода в бег
     [SerializeField] private Color sprintColor = Color.blue;
     [SerializeField] private Renderer characterRenderer; // Ссылка на MeshRenderer модели
+    [SerializeField] private Transform characterModel; // Перетащите сюда объект с моделью (меш)
+    [SerializeField] private float shakeIntensity = 0.2f; // Сила тряски
+    [SerializeField] private float visualDashDuration = 0.5f; // Сколько времени персонаж будет синим и будет трястись
 
     [Header("Настройки силы рывка")]
     [SerializeField] private float dashForceHorizontal = 15f; // Сила для WASD
@@ -82,7 +85,7 @@ public class PlayerSideController : MonoBehaviour
     private float shiftPressTime = 0f;
     private Color originalColor;
     private Material charMaterial;
-
+    private Vector3 staticModelPos; // Настоящий "центр" модели
 
     // Публичные свойства для других скриптов
     public bool IsAiming { get; private set; }
@@ -111,6 +114,10 @@ public class PlayerSideController : MonoBehaviour
     {
         mainCam = Camera.main;
         Canvas.SetActive(true);
+        if (characterModel != null)
+        {
+            staticModelPos = characterModel.localPosition;
+        }
     }
 
     private void Awake()
@@ -149,29 +156,23 @@ public class PlayerSideController : MonoBehaviour
     private void Update()
     {
         HandleCrouch();
-
         HandleSprintAndDash();
 
-        // Проверка земли
         wasGrounded = isGrounded;
         isGrounded = Physics.CheckSphere(groundCheck.position, groundCheckRadius, groundLayer);
 
-        // Логика прицеливания
-        //IsAiming = Input.GetMouseButton(1);
-        //animator.SetBool("isAiming", IsAiming);
-
-        // Обновление веса слоя анимации
         UpdateAimLayerWeight();
 
-        // Ввод движения (блокируется при прицеливании или блокировке)
         if (CanMove && !isMovementLocked && !IsAiming && !isDashing)
         {
             horizontalInput = Input.GetAxisRaw("Horizontal");
         }
-        else if (isDashing) { /* не меняем horizontalInput */ }
-        else { horizontalInput = 0f; }
+        else if (!isDashing)
+        {
+            horizontalInput = 0f;
+        }
 
-        // Таймеры прыжка
+        // Таймеры (Time.deltaTime здесь уместен, так как это просто отсчет времени)
         if (Input.GetButtonDown("Jump"))
             jumpBufferCounter = jumpBufferTime;
         else
@@ -182,27 +183,22 @@ public class PlayerSideController : MonoBehaviour
         else
             coyoteTimeCounter -= Time.deltaTime;
 
-        // Звук приземления
         if (isGrounded && !wasGrounded && Time.time - lastJumpTime > 0.2f)
         {
             if (footstepScript != null)
                 footstepScript.PlayJumpOrLandSound();
         }
 
-        // Логика прыжка
         if (canJump && jumpBufferCounter > 0 && coyoteTimeCounter > 0)
         {
             ApplyJump();
         }
 
-        // В Update() вашего PlayerSideController:
-        if (Input.GetMouseButtonDown(1)) // Например, выстрел на ПКМ
+        if (Input.GetMouseButtonDown(1))
         {
             animator.SetTrigger("shoot");
-            // Больше ничего делать не нужно — анимация сама вызовет ShootEvent
         }
 
-        // Атака
         if (Time.time >= nextAttackTime)
         {
             if (Input.GetMouseButton(0) && !Input.GetMouseButton(1))
@@ -211,16 +207,8 @@ public class PlayerSideController : MonoBehaviour
             }
         }
 
-        // Поворот персонажа (только когда не прицеливаемся)
-        //if (!IsAiming)
-        //{
-            HandleRotation();
-        //}
-
-        // Анимации
+        HandleRotation();
         UpdateAnimations();
-
-        // Отслеживание падения
         CheckFallingState();
     }
 
@@ -305,6 +293,7 @@ public class PlayerSideController : MonoBehaviour
             // Сразу запускаем рывок при нажатии
             if (!isDashing)
             {
+                
                 StartCoroutine(DashRoutine());
             }
         }
@@ -326,42 +315,56 @@ public class PlayerSideController : MonoBehaviour
 
     private IEnumerator DashRoutine()
     {
-        isDashing = true;
-        animator.SetTrigger("Dash");
+        // Блокируем повторный запуск, чтобы не сбить позицию
+        if (isDashing) yield break;
 
+        isDashing = true;
+
+        // Эффекты
+        if (charMaterial) charMaterial.color = sprintColor;
         audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
         audioSource.PlayOneShot(DashSound, volume);
 
-        if (charMaterial) charMaterial.color = sprintColor;
-
+        // Физика
         float vInput = Input.GetAxisRaw("Vertical");
         float hInput = Input.GetAxisRaw("Horizontal");
-
-        // Считаем направление
         Vector3 dashDirection = new Vector3(hInput, vInput, 0f).normalized;
         if (dashDirection == Vector3.zero)
             dashDirection = facingRight ? Vector3.right : Vector3.left;
 
-        // ОБНУЛЯЕМ скорость перед рывком, чтобы результат всегда был предсказуемым
         rb.velocity = Vector3.zero;
-
-        // Применяем разную силу для разных осей
-        float finalDashForceX = dashDirection.x * dashForceHorizontal;
-        float finalDashForceY = dashDirection.y * dashForceVertical;
-
-        rb.velocity = new Vector3(finalDashForceX, finalDashForceY, 0f);
-
-        // Временно отключаем гравитацию, чтобы персонаж летел ровно по вектору
+        rb.velocity = new Vector3(dashDirection.x * dashForceHorizontal, dashDirection.y * dashForceVertical, 0f);
         rb.useGravity = false;
 
-        yield return new WaitForSeconds(dashDuration);
+        float elapsed = 0f;
+        bool physicsEnded = false;
 
-        // Возвращаем гравитацию и сбрасываем состояние
+        while (elapsed < visualDashDuration)
+        {
+            // Тряска относительно ГЛОБАЛЬНО зафиксированного центра
+            float offsetX = Random.Range(-1f, 1f) * shakeIntensity;
+            float offsetY = Random.Range(-1f, 1f) * shakeIntensity;
+            characterModel.localPosition = staticModelPos + new Vector3(offsetX, offsetY, 0);
+
+            if (!physicsEnded && elapsed >= dashDuration)
+            {
+                rb.useGravity = true;
+                isDashing = false;
+                physicsEnded = true;
+            }
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        // ЖЕСТКИЙ ВОЗВРАТ в исходную точку
+        characterModel.localPosition = staticModelPos;
+
+        if (charMaterial) charMaterial.color = originalColor;
+
+        // Страховка возврата управления
         rb.useGravity = true;
         isDashing = false;
-
-        
-            charMaterial.color = originalColor;
     }
 
     private void StartSprint()
@@ -389,65 +392,44 @@ public class PlayerSideController : MonoBehaviour
 
         if (!isMovementLocked && !IsAiming && CanMove && !isDashing)
         {
-            // Считаем скорость с учетом приседа
             float currentMaxSpeed = moveSpeed;
             if (isSprinting) currentMaxSpeed *= sprintSpeedMultiplier;
-            if (isCrouching) currentMaxSpeed *= crouchSpeedMultiplier; // Замедляем на корточках
+            if (isCrouching) currentMaxSpeed *= crouchSpeedMultiplier;
 
             float targetSpeed = horizontalInput * currentMaxSpeed;
 
-            // ... (ваша существующая логика проверки стен и AddForce) ...
-            float speedDiff = targetSpeed - rb.velocity.x;
-            float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
-            float movement = speedDiff * accelRate * Time.fixedDeltaTime;
-            rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
-        }
-        transform.position = new Vector3(transform.position.x, transform.position.y, lockedZ);
-
-        if (!isMovementLocked && !IsAiming && CanMove && !isDashing)
-        {
-            // 1. Считаем целевую скорость
-            float currentMaxSpeed = isSprinting ? moveSpeed * sprintSpeedMultiplier : moveSpeed;
-            float targetSpeed = horizontalInput * currentMaxSpeed;
-
-            // 2. ПРОВЕРКА СТЕНЫ (Raycast)
+            // ПРОВЕРКА СТЕНЫ
             if (Mathf.Abs(horizontalInput) > 0.01f)
             {
-                // Пускаем 3 луча (у колен, у пояса, у головы), чтобы точно поймать стену
                 bool hittingWall =
                     Physics.Raycast(transform.position + Vector3.up * 0.2f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
                     Physics.Raycast(transform.position + Vector3.up * 1f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
                     Physics.Raycast(transform.position + Vector3.up * 1.8f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer);
 
-                if (hittingWall)
-                {
-                    // Если стена впереди, обнуляем целевую скорость только в сторону стены
-                    targetSpeed = 0;
-
-                    // Дополнительно: мягко обнуляем текущую горизонтальную скорость Rigidbody
-                    rb.velocity = new Vector3(0, rb.velocity.y, 0);
-                }
+                if (hittingWall) targetSpeed = 0;
             }
 
-            // 3. Прикладываем силу
+            // ИСПРАВЛЕНИЕ: Для VelocityChange НЕ нужно умножать на Time.fixedDeltaTime
+            // Мы вычисляем разницу скоростей и применяем её сразу.
             float speedDiff = targetSpeed - rb.velocity.x;
             float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
+
+            // Чтобы ускорение было плавным, мы ограничиваем изменение скорости
             float movement = speedDiff * accelRate * Time.fixedDeltaTime;
 
             rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
         }
 
-        // Принудительная фиксация Z (чтобы не вылетал из плоскости при ударах)
-        transform.position = new Vector3(transform.position.x, transform.position.y, lockedZ);
+        // Фиксация Z
+        rb.position = new Vector3(rb.position.x, rb.position.y, lockedZ);
     }
 
     private void ApplyVariableJumpHeight()
     {
-        // Если мы летим ВВЕРХ, но при этом НЕ держим кнопку прыжка
+        // ИСПРАВЛЕНИЕ: Для физических манипуляций в FixedUpdate
         if (rb.velocity.y > 0 && !Input.GetButton("Jump"))
         {
-            // Применяем дополнительную силу тяжести, чтобы прыжок был коротким
-            // Physics.gravity.y * (lowJumpMultiplier - 1) — это добавочная гравитация
+            // Умножаем на fixedDeltaTime, так как это постепенное накопление силы (как гравитация)
             rb.velocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
         }
     }
@@ -459,7 +441,8 @@ public class PlayerSideController : MonoBehaviour
 
         float targetWeight = IsAiming ? 1f : 0f;
         float currentWeight = animator.GetLayerWeight(topLayerIndex);
-        float newWeight = Mathf.Lerp(currentWeight, targetWeight, Time.deltaTime * 5f);
+        // Используем 1 - exp для независимости Lerp от FPS
+        float newWeight = Mathf.Lerp(currentWeight, targetWeight, 1.0f - Mathf.Exp(-10f * Time.deltaTime));
         animator.SetLayerWeight(topLayerIndex, newWeight);
     }
 
@@ -697,10 +680,12 @@ public class PlayerSideController : MonoBehaviour
             }
         }
 
+        float smoothness = 1.0f - Mathf.Exp(-rotationSpeed * Time.deltaTime);
+
         transform.rotation = Quaternion.Slerp(
             transform.rotation,
             targetRotation,
-            rotationSpeed * Time.deltaTime
+            smoothness
         );
     }
 
