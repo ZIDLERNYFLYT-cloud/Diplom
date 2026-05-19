@@ -4,28 +4,29 @@ using System.Collections;
 public class ElevatorController : MonoBehaviour
 {
     [Header("Настройки взаимодействия")]
-    [SerializeField] private KeyCode interactionKey = KeyCode.E;
-    [SerializeField] private GameObject interactionUI;
     [SerializeField] private float interactionRadius = 3f;
+    [SerializeField] private GameObject interactionUI;
 
     [Header("Настройки лифта")]
-    [SerializeField] private float liftDistance = 5f;      // На сколько поднимется лифт
-    [SerializeField] private float counterweightDistance = 3f; // На сколько опустятся противовесы
-    [SerializeField] private float moveSpeed = 2f;         // Скорость движения
-    [SerializeField] private AudioSource audioSource;      // Ссылка на звук
+    [SerializeField] private float liftDistance = 5f;
+    [SerializeField] private float doorDistance = 3f;      // На сколько двигаются двери
+    [SerializeField] private float moveSpeed = 2f;
+    [SerializeField] private float doorSpeed = 1.5f;       // Скорость дверей (отдельно)
 
-    [Header("Дочерние объекты (Противовесы)")]
+    [Header("Звуки")]
+    [SerializeField] private AudioSource audioSource1Dveri;
+    [SerializeField] private AudioSource audioSource2Message;
+
+    [Header("Двери")]
     [SerializeField] private Transform child1;
     [SerializeField] private Transform child2;
 
-    private bool playerInRange = false;
-    private bool isActivated = false; // Чтобы нельзя было нажать дважды
+    private bool isActivated = false;
 
     private void Awake()
     {
         if (interactionUI != null) interactionUI.SetActive(false);
 
-        // Настройка триггера программно
         SphereCollider col = GetComponent<SphereCollider>();
         if (col != null)
         {
@@ -34,78 +35,81 @@ public class ElevatorController : MonoBehaviour
         }
     }
 
-    private void Update()
+   
+    public IEnumerator ActivateElevator()
     {
-        if (playerInRange && !isActivated && Input.GetKeyDown(interactionKey))
-        {
-            StartCoroutine(ActivateElevator());
-        }
-    }
-
-    private IEnumerator ActivateElevator()
-    {
+        
+        if (isActivated) yield break;
         isActivated = true;
 
-        // Скрываем подсказку сразу после нажатия
         if (interactionUI != null) interactionUI.SetActive(false);
 
-        // 1. Проигрываем звук
-        if (audioSource != null)
-        {
-            audioSource.Play();
-            // Ждем завершения звука (или уберите yield, если лифт должен ехать сразу со звуком)
-            yield return new WaitForSeconds(audioSource.clip.length);
-        }
+        // --- ФАЗА 1: ЗАКРЫТИЕ ДВЕРЕЙ ---
+        if (audioSource1Dveri != null) audioSource1Dveri.Play();
 
-        // 2. Движение
-        Vector3 startPos = transform.position;
-        Vector3 targetPos = startPos + Vector3.up * liftDistance;
-
-        Vector3 child1Start = child1.localPosition;
-        Vector3 child1Target = child1Start + Vector3.down * counterweightDistance;
-
-        Vector3 child2Start = child2.localPosition;
-        Vector3 child2Target = child2Start + Vector3.down * counterweightDistance;
+        Vector3 c1Start = child1.localPosition;
+        Vector3 c1Closed = c1Start + Vector3.down * doorDistance;
+        Vector3 c2Start = child2.localPosition;
+        Vector3 c2Closed = c2Start + Vector3.down * doorDistance;
 
         float elapsed = 0;
-        float duration = liftDistance / moveSpeed;
+        float doorDuration = doorDistance / doorSpeed;
 
-        while (elapsed < duration)
+        while (elapsed < doorDuration)
         {
             elapsed += Time.deltaTime;
-            float t = elapsed / duration;
-
-            // Двигаем сам лифт
-            transform.position = Vector3.Lerp(startPos, targetPos, t);
-
-            // Двигаем дочерние объекты локально вниз
-            if (child1 != null) child1.localPosition = Vector3.Lerp(child1Start, child1Target, t);
-            if (child2 != null) child2.localPosition = Vector3.Lerp(child2Start, child2Target, t);
-
-            yield return null;
+            float t = elapsed / doorDuration;
+            if (child1 != null) child1.localPosition = Vector3.Lerp(c1Start, c1Closed, t);
+            if (child2 != null) child2.localPosition = Vector3.Lerp(c2Start, c2Closed, t);
+            yield return new WaitForFixedUpdate();
         }
 
-        // Фиксируем финальные позиции
-        transform.position = targetPos;
-        if (child1 != null) child1.localPosition = child1Target;
-        if (child2 != null) child2.localPosition = child2Target;
-    }
-
-    private void OnTriggerEnter(Collider other)
-    {
-        if (other.CompareTag("Player") && !isActivated)
+        // --- ФАЗА 2: СООБЩЕНИЕ И ПАУЗА ---
+        if (audioSource2Message != null)
         {
-            playerInRange = true;
-            if (interactionUI != null) interactionUI.SetActive(true);
+            audioSource2Message.Play();
+            // Ждем, пока сообщение проиграется (или фиксированное время)
+            
         }
-    }
+        yield return new WaitForSeconds(0.5f); // Короткая пауза перед рывком лифта
 
-    private void OnTriggerExit(Collider other)
-    {
-        if (other.CompareTag("Player"))
+        // --- ФАЗА 3: ДВИЖЕНИЕ ЛИФТА ---
+        Vector3 liftStart = transform.position;
+        Vector3 liftTarget = liftStart + Vector3.up * liftDistance;
+
+        elapsed = 0;
+        float liftDuration = liftDistance / moveSpeed;
+
+        while (elapsed < liftDuration)
         {
-            playerInRange = false;
-            if (interactionUI != null) interactionUI.SetActive(false);
+            elapsed += Time.deltaTime;
+            float t = elapsed / liftDuration;
+            transform.position = Vector3.Lerp(liftStart, liftTarget, t);
+            yield return new WaitForFixedUpdate();
         }
+        transform.position = liftTarget;
+
+        // --- ФАЗА 4: ОСТАНОВКА ПЕРЕД ОТКРЫТИЕМ ---
+        yield return new WaitForSeconds(2.0f); // Лифт стоит несколько секунд
+
+        // --- ФАЗА 5: ОТКРЫТИЕ ДВЕРЕЙ ---
+        if (audioSource1Dveri != null) audioSource1Dveri.Play(); // Звук открытия
+
+        elapsed = 0;
+        // Двигаем обратно из Closed в Start
+        while (elapsed < doorDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / doorDuration;
+            if (child1 != null) child1.localPosition = Vector3.Lerp(c1Closed, c1Start, t);
+            if (child2 != null) child2.localPosition = Vector3.Lerp(c2Closed, c2Start, t);
+            yield return new WaitForFixedUpdate();
+        }
+
+        // Финальная фиксация
+        if (child1 != null) child1.localPosition = c1Start;
+        if (child2 != null) child2.localPosition = c2Start;
+
+        // isActivated = false; // Раскомментируйте, если лифт можно использовать снова
     }
 }
