@@ -22,6 +22,10 @@ public class ElevatorController : MonoBehaviour
     [SerializeField] private Transform child2;
 
     private bool isActivated = false;
+    private bool isMovingUp = true; // Направление движения: вверх или вниз
+
+    private Vector3 startPosition;  // Начальная позиция лифта
+    private Vector3 endPosition;    // Конечная позиция лифта
 
     private void Awake()
     {
@@ -33,12 +37,14 @@ public class ElevatorController : MonoBehaviour
             col.isTrigger = true;
             col.radius = interactionRadius;
         }
+
+        // Запоминаем начальную и конечную позиции
+        startPosition = transform.position;
+        endPosition = startPosition + Vector3.up * liftDistance;
     }
 
-   
     public IEnumerator ActivateElevator()
     {
-        
         if (isActivated) yield break;
         isActivated = true;
 
@@ -68,14 +74,12 @@ public class ElevatorController : MonoBehaviour
         if (audioSource2Message != null)
         {
             audioSource2Message.Play();
-            // Ждем, пока сообщение проиграется (или фиксированное время)
-            
         }
         yield return new WaitForSeconds(0.5f); // Короткая пауза перед рывком лифта
 
-        // --- ФАЗА 3: ДВИЖЕНИЕ ЛИФТА ---
+        // --- ФАЗА 3: ДВИЖЕНИЕ ЛИФТА (в зависимости от направления) ---
         Vector3 liftStart = transform.position;
-        Vector3 liftTarget = liftStart + Vector3.up * liftDistance;
+        Vector3 liftTarget = isMovingUp ? endPosition : startPosition;
 
         elapsed = 0;
         float liftDuration = liftDistance / moveSpeed;
@@ -110,6 +114,9 @@ public class ElevatorController : MonoBehaviour
         if (child1 != null) child1.localPosition = c1Start;
         if (child2 != null) child2.localPosition = c2Start;
 
-        // isActivated = false; // Раскомментируйте, если лифт можно использовать снова
+        // Меняем направление для следующего использования
+        isMovingUp = !isMovingUp;
+
+        isActivated = false; // Лифт можно использовать снова
     }
 }
