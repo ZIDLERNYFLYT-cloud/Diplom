@@ -177,6 +177,15 @@ public class PlayerSideController : MonoBehaviour
 
     private void Update()
     {
+        // ПОЛНАЯ БЛОКИРОВКА КОРНЕВОГО ВВОДА, ЕСЛИ ПЕРСОНАЖ ПОДТЯГИВАЕТСЯ
+        if (isClimbing)
+        {
+            horizontalInput = 0f;
+            jumpBufferCounter = 0f;
+            coyoteTimeCounter = 0f;
+            return;
+        }
+
         HandleCrouch();
         HandleSprintAndDash();
 
@@ -185,11 +194,11 @@ public class PlayerSideController : MonoBehaviour
 
         UpdateAimLayerWeight();
 
-        if (CanMove && !isMovementLocked && !IsAiming && !isDashing && !isWallGrabbing && !isClimbing)
+        if (CanMove && !isMovementLocked && !IsAiming && !isDashing && !isWallGrabbing)
         {
             horizontalInput = Input.GetAxisRaw("Horizontal");
         }
-        else if (!isDashing && !isWallGrabbing && !isClimbing)
+        else if (!isDashing && !isWallGrabbing)
         {
             horizontalInput = 0f;
         }
@@ -206,17 +215,17 @@ public class PlayerSideController : MonoBehaviour
         else
             coyoteTimeCounter -= Time.deltaTime;
 
-        if (canJump && jumpBufferCounter > 0 && coyoteTimeCounter > 0 && !isWallGrabbing && !isClimbing)
+        if (canJump && jumpBufferCounter > 0 && coyoteTimeCounter > 0 && !isWallGrabbing)
         {
             ApplyJump();
         }
 
-        if (Input.GetButtonDown("Jump") && isWallGrabbing && canWallGrabAbility && !isClimbing)
+        if (Input.GetButtonDown("Jump") && isWallGrabbing && canWallGrabAbility)
         {
             JumpFromWall();
         }
 
-        if (isWallGrabbing && (Input.GetAxisRaw("Horizontal") == 0 || isGrounded) && !isClimbing)
+        if (isWallGrabbing && (Input.GetAxisRaw("Horizontal") == 0 || isGrounded))
         {
             ReleaseWall();
         }
@@ -241,6 +250,7 @@ public class PlayerSideController : MonoBehaviour
 
     private void CheckWallGrab()
     {
+        // 1. Базовые проверки на возможность зацепа
         if (!canWallGrabAbility || isGrounded || isDashing || isClimbing)
         {
             if (isWallGrabbing) ReleaseWall();
@@ -250,47 +260,58 @@ public class PlayerSideController : MonoBehaviour
         float direction = horizontalInput != 0 ? Mathf.Sign(horizontalInput) : (facingRight ? 1f : -1f);
         Vector3 checkDir = Vector3.right * direction;
 
-        // 1. Проверяем, есть ли вообще стена перед ногами (высота 0.2м)
+        // 2. Проверяем наличие стены перед персонажем
         bool wallAtFeet = Physics.Raycast(transform.position + Vector3.up * 0.2f, checkDir, out RaycastHit wallHit, wallGrabCheckDistance, groundLayer);
 
-        if (wallAtFeet && Mathf.Abs(horizontalInput) > 0.05f)
+        if (wallAtFeet)
         {
-            // 2. Ищем край платформы методом "сканирования" сверху вниз.
-            // Пускаем луч над предполагаемым краем вперед и вниз.
-            // Максимальная высота зацепа — Climb Check Height (1.65), но если стена ниже, мы её всё равно найдём!
-            Vector3 rayStart = transform.position + Vector3.up * climbCheckHeight + checkDir * (wallGrabCheckDistance + 0.1f);
-
-            // Стреляем вертикально вниз, чтобы найти верхнюю плоскость (пол) платформы
-            if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit ledgeHit, climbCheckHeight, groundLayer))
+            // ВСТАВЛЯЕМ БЕЗОПАСНУЮ ПРОВЕРКУ ТЕГА СЮДА:
+            try
             {
-                // Находим точную высоту платформы относительно ног персонажа
-                float platformHeight = ledgeHit.point.y - transform.position.y;
-
-                // 3. Условие зацепа: 
-                // Персонаж зацепится, если высота платформы больше 0.4м (чтобы не цепляться за кочки)
-                if (platformHeight > 0.4f)
+                if (wallHit.collider == null || !wallHit.collider.CompareTag("Wall"))
                 {
-                    // Если персонаж находится в воздухе и его руки/грудь дотягиваются до этого края
-                    if (transform.position.y + 1.5f >= ledgeHit.point.y)
+                    if (isWallGrabbing) ReleaseWall();
+                    return;
+                }
+            }
+            catch (System.Exception e)
+            {
+                // Если забыли создать тег в Unity, игра не зависнет, а просто предупредит вас
+                Debug.LogError($"[WallGrab Error] Тег 'Wall' не создан в настройках Unity! Ошибка: {e.Message}");
+                if (isWallGrabbing) ReleaseWall();
+                return;
+            }
+
+            // 3. Если мы здесь, значит стена имеет тег "Wall" и мы проверяем нажатие клавиш
+            if (Mathf.Abs(horizontalInput) > 0.05f)
+            {
+                // Ищем край платформы
+                Vector3 rayStart = transform.position + Vector3.up * climbCheckHeight + checkDir * (wallGrabCheckDistance + 0.1f);
+
+                if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit ledgeHit, climbCheckHeight, groundLayer))
+                {
+                    float platformHeight = ledgeHit.point.y - transform.position.y;
+
+                    if (platformHeight > 0.4f)
                     {
-                        // Запускаем вскарабкивание!
-                        StartCoroutine(ClimbWallRoutine(direction));
-                        return;
-                    }
-                    else
-                    {
-                        // Если платформа слишком высоко для подтягивания — просто скользим/висим
-                        GrabWall(wallHit);
-                        return;
+                        if (transform.position.y + 1.5f >= ledgeHit.point.y)
+                        {
+                            StartCoroutine(ClimbWallRoutine(direction, ledgeHit.point));
+                            return;
+                        }
+                        else
+                        {
+                            GrabWall(wallHit);
+                            return;
+                        }
                     }
                 }
             }
         }
-
-        // Если стены нет или игрок ничего не жмет — отпускаем
-        if (isWallGrabbing && Mathf.Abs(horizontalInput) < 0.05f)
+        else
         {
-            ReleaseWall();
+            // Если стены перед нами вообще нет — отцепляемся
+            if (isWallGrabbing) ReleaseWall();
         }
     }
 
@@ -305,29 +326,40 @@ public class PlayerSideController : MonoBehaviour
     }
 
     // Добавляем параметр currentLedgeHeight
-    private IEnumerator ClimbWallRoutine(float direction)
+    private IEnumerator ClimbWallRoutine(float direction, Vector3 ledgePoint)
     {
         isClimbing = true;
         isWallGrabbing = true;
 
         rb.velocity = Vector3.zero;
         rb.useGravity = false;
+        
+        // Отключаем коллизии на время анимации, чтобы не "зацепиться" за край физикой
+        playerCollider.enabled = false;
 
         if (animator != null)
-            animator.SetTrigger("ClimbFinish"); // Или "ClimbWall", смотря как назвали триггер
+            animator.SetTrigger("ClimbFinish");
 
         Vector3 startPos = transform.position;
 
-        // ХАРДКОДНЫЙ РАСЧЕТ: берем строго значения из инспектора (Climb Height и Climb Forward Offset)
-        Vector3 targetPos = startPos + new Vector3(direction * climbForwardOffset, climbHeight, 0f);
+        // ВЫЧИСЛЯЕМ ТАРГЕТ ДИНАМИЧЕСКИ:
+        // Y = высота самой платформы + небольшой запас (например, 0.1м), чтобы персонаж встал НА нее.
+        // X = позиция края + смещение вперед, чтобы персонаж не стоял на самом пикселе угла.
+        Vector3 targetPos = new Vector3(
+            ledgePoint.x + (direction * 0.1f), // 0.4f - отступ внутрь платформы
+            ledgePoint.y + 0.05f,              // Чуть выше поверхности
+            lockedZ
+            
+        );
+        animator.SetTrigger("ClimbFinishOneFoot");
 
         float elapsed = 0f;
         while (elapsed < climbDuration)
         {
             float t = elapsed / climbDuration;
-            float curve = t * t * (3f - 2f * t); // Плавное сглаживание движения
+            // Используем более "физичную" кривую для подтягивания (сначала вверх, потом вперед)
+            float curve = t * t * (3f - 2f * t);
 
-            // Силой перемещаем трансформ в целевую точку
             transform.position = Vector3.Lerp(startPos, targetPos, curve);
 
             elapsed += Time.deltaTime;
@@ -335,14 +367,19 @@ public class PlayerSideController : MonoBehaviour
         }
 
         transform.position = targetPos;
+
+        // Включаем физику обратно
+        playerCollider.enabled = true;
         rb.useGravity = true;
         isClimbing = false;
         isWallGrabbing = false;
 
         if (animator != null)
-        {
             animator.SetBool("IsWallGrabbing", false);
-        }
+        isClimbing = false;
+        isWallGrabbing = false;
+        rb.useGravity = true;
+        playerCollider.enabled = true;
     }
 
     private void GrabWall(RaycastHit hit)
