@@ -17,7 +17,7 @@ public class WaypointMover : MonoBehaviour
         MoveTowardsTarget();
     }
 
-    private void MoveTowardsTarget()
+    public void MoveTowardsTarget()
     {
         // ѕолучаем позицию текущей целевой точки
         Vector3 targetPosition = waypoints[currentWaypointIndex].position;

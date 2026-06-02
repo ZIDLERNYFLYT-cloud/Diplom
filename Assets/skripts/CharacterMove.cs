@@ -27,7 +27,7 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float climbDuration = 0.6f;
     [SerializeField] private float climbCheckHeight = 2.0f;
     [SerializeField] private float climbCheckDistance = 0.6f;
-    [SerializeField, Range(0, 1)] private float hangAnimationFrame = 0.1f; // Тот самый кадр виса
+    [SerializeField, Range(0, 1)] private float hangAnimationFrame = 0.1f;
     [SerializeField] private float chest = 0.25f;
     [SerializeField] private float feet = 0.25f;
 
@@ -50,7 +50,7 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private PhysicMaterial wallGrabMaterial;
     [SerializeField] private PhysicMaterial defaultMaterial;
 
-    [Header("Атака")]
+    [Header("Атака пинком (ОТКЛЮЧАЕТСЯ ПРИ МЕЧЕ)")]
     [SerializeField] private Transform attackPoint;
     [SerializeField] private float attackRange = 0.8f;
     [SerializeField] private LayerMask enemyLayer;
@@ -58,6 +58,7 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] private float attackRate = 0.5f;
     private float nextAttackTime = 0f;
     private int comboStep = 0;
+    [SerializeField] private float attackAnimationSpeed = 1.5f;
 
     [Header("Звуки")]
     [SerializeField] private AudioClip kickSound;
@@ -100,6 +101,10 @@ public class PlayerSideController : MonoBehaviour
     [SerializeField] public CapsuleCollider playerCollider;
     private bool isCrouching = false;
 
+    [Header("СИСТЕМА АТАКИ МЕЧОМ")]
+    [SerializeField] private PlayerCombat swordCombat;
+    [SerializeField] private bool useSwordInsteadOfKick = true;
+
     private bool isDashing = false;
     private bool isSprinting = false;
     private float shiftPressTime = 0f;
@@ -141,6 +146,11 @@ public class PlayerSideController : MonoBehaviour
             staticModelPos = characterModel.localPosition;
         }
         originalDrag = rb.drag;
+
+        if (swordCombat == null)
+        {
+            swordCombat = GetComponent<PlayerCombat>();
+        }
     }
 
     private void Awake()
@@ -175,9 +185,8 @@ public class PlayerSideController : MonoBehaviour
         currentFallDistance = 0f;
     }
 
-    private void Update()
+    void Update()
     {
-        // ПОЛНАЯ БЛОКИРОВКА КОРНЕВОГО ВВОДА, ЕСЛИ ПЕРСОНАЖ ПОДТЯГИВАЕТСЯ
         if (isClimbing)
         {
             horizontalInput = 0f;
@@ -235,11 +244,16 @@ public class PlayerSideController : MonoBehaviour
             animator.SetTrigger("shoot");
         }
 
+        // ИСПРАВЛЕНА АТАКА - убираем конфликт с мечом
         if (Time.time >= nextAttackTime)
         {
-            if (Input.GetMouseButton(0) && !Input.GetMouseButton(1))
+            if (Input.GetMouseButtonDown(0) && !Input.GetMouseButton(1)) // Используем GetMouseButtonDown вместо GetMouseButton
             {
-                Attack();
+                if (!useSwordInsteadOfKick || swordCombat == null)
+                {
+                    KickAttack();
+                }
+                // Если меч включен, ничего не делаем - меч сам обрабатывает атаку
             }
         }
 
@@ -248,9 +262,50 @@ public class PlayerSideController : MonoBehaviour
         CheckFallingState();
     }
 
+    private void FixedUpdate()
+    {
+        if (isClimbing)
+        {
+            rb.velocity = Vector3.zero;
+            return;
+        }
+
+        ApplyVariableJumpHeight();
+
+        if (!isMovementLocked && !IsAiming && CanMove && !isDashing && !isWallGrabbing)
+        {
+            float currentMaxSpeed = moveSpeed;
+            if (isSprinting) currentMaxSpeed *= sprintSpeedMultiplier;
+            if (isCrouching) currentMaxSpeed *= crouchSpeedMultiplier;
+
+            float targetSpeed = horizontalInput * currentMaxSpeed;
+
+            if (Mathf.Abs(horizontalInput) > 0.01f && !isWallGrabbing)
+            {
+                bool hittingWall =
+                    Physics.Raycast(transform.position + Vector3.up * 0.2f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
+                    Physics.Raycast(transform.position + Vector3.up * 1f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
+                    Physics.Raycast(transform.position + Vector3.up * 1.8f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer);
+
+                if (hittingWall) targetSpeed = 0;
+            }
+
+            float speedDiff = targetSpeed - rb.velocity.x;
+            float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
+            float movement = speedDiff * accelRate * Time.fixedDeltaTime;
+            rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
+        }
+
+        if (isWallGrabbing && !isClimbing)
+        {
+            rb.velocity = new Vector3(0f, Mathf.Clamp(rb.velocity.y, -wallSlideSpeed, 2f), 0f);
+        }
+
+        rb.position = new Vector3(rb.position.x, rb.position.y, lockedZ);
+    }
+
     private void CheckWallGrab()
     {
-        // 1. Базовые проверки на возможность зацепа
         if (!canWallGrabAbility || isGrounded || isDashing || isClimbing)
         {
             if (isWallGrabbing) ReleaseWall();
@@ -260,12 +315,10 @@ public class PlayerSideController : MonoBehaviour
         float direction = horizontalInput != 0 ? Mathf.Sign(horizontalInput) : (facingRight ? 1f : -1f);
         Vector3 checkDir = Vector3.right * direction;
 
-        // 2. Проверяем наличие стены перед персонажем
         bool wallAtFeet = Physics.Raycast(transform.position + Vector3.up * 0.2f, checkDir, out RaycastHit wallHit, wallGrabCheckDistance, groundLayer);
 
         if (wallAtFeet)
         {
-            // ВСТАВЛЯЕМ БЕЗОПАСНУЮ ПРОВЕРКУ ТЕГА СЮДА:
             try
             {
                 if (wallHit.collider == null || !wallHit.collider.CompareTag("Wall"))
@@ -276,16 +329,13 @@ public class PlayerSideController : MonoBehaviour
             }
             catch (System.Exception e)
             {
-                // Если забыли создать тег в Unity, игра не зависнет, а просто предупредит вас
-                Debug.LogError($"[WallGrab Error] Тег 'Wall' не создан в настройках Unity! Ошибка: {e.Message}");
+                Debug.LogError($"Тег 'Wall' не создан! Ошибка: {e.Message}");
                 if (isWallGrabbing) ReleaseWall();
                 return;
             }
 
-            // 3. Если мы здесь, значит стена имеет тег "Wall" и мы проверяем нажатие клавиш
             if (Mathf.Abs(horizontalInput) > 0.05f)
             {
-                // Ищем край платформы
                 Vector3 rayStart = transform.position + Vector3.up * climbCheckHeight + checkDir * (wallGrabCheckDistance + 0.1f);
 
                 if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit ledgeHit, climbCheckHeight, groundLayer))
@@ -310,22 +360,10 @@ public class PlayerSideController : MonoBehaviour
         }
         else
         {
-            // Если стены перед нами вообще нет — отцепляемся
             if (isWallGrabbing) ReleaseWall();
         }
     }
 
-    private bool CanClimbWall(float direction)
-    {
-        Vector3 checkDir = Vector3.right * direction;
-
-        bool topBlocked = Physics.Raycast(transform.position + Vector3.up * climbCheckHeight,
-                                        checkDir, climbCheckDistance, groundLayer);
-
-        return !topBlocked;
-    }
-
-    // Добавляем параметр currentLedgeHeight
     private IEnumerator ClimbWallRoutine(float direction, Vector3 ledgePoint)
     {
         isClimbing = true;
@@ -333,8 +371,6 @@ public class PlayerSideController : MonoBehaviour
 
         rb.velocity = Vector3.zero;
         rb.useGravity = false;
-        
-        // Отключаем коллизии на время анимации, чтобы не "зацепиться" за край физикой
         playerCollider.enabled = false;
 
         if (animator != null)
@@ -342,33 +378,23 @@ public class PlayerSideController : MonoBehaviour
 
         Vector3 startPos = transform.position;
 
-        // ВЫЧИСЛЯЕМ ТАРГЕТ ДИНАМИЧЕСКИ:
-        // Y = высота самой платформы + небольшой запас (например, 0.1м), чтобы персонаж встал НА нее.
-        // X = позиция края + смещение вперед, чтобы персонаж не стоял на самом пикселе угла.
         Vector3 targetPos = new Vector3(
-            ledgePoint.x + (direction * 0.1f), // 0.4f - отступ внутрь платформы
-            ledgePoint.y + 0.05f,              // Чуть выше поверхности
+            ledgePoint.x + (direction * 0.1f),
+            ledgePoint.y + 0.05f,
             lockedZ
-            
         );
-        animator.SetTrigger("ClimbFinishOneFoot");
 
         float elapsed = 0f;
         while (elapsed < climbDuration)
         {
             float t = elapsed / climbDuration;
-            // Используем более "физичную" кривую для подтягивания (сначала вверх, потом вперед)
             float curve = t * t * (3f - 2f * t);
-
             transform.position = Vector3.Lerp(startPos, targetPos, curve);
-
             elapsed += Time.deltaTime;
             yield return null;
         }
 
         transform.position = targetPos;
-
-        // Включаем физику обратно
         playerCollider.enabled = true;
         rb.useGravity = true;
         isClimbing = false;
@@ -376,10 +402,6 @@ public class PlayerSideController : MonoBehaviour
 
         if (animator != null)
             animator.SetBool("IsWallGrabbing", false);
-        isClimbing = false;
-        isWallGrabbing = false;
-        rb.useGravity = true;
-        playerCollider.enabled = true;
     }
 
     private void GrabWall(RaycastHit hit)
@@ -409,8 +431,6 @@ public class PlayerSideController : MonoBehaviour
             animator.SetBool("IsFalling", false);
             animator.SetBool("IsLongFall", false);
         }
-
-        Debug.Log("=== ЗАЦЕПИЛСЯ (скольжение) ===");
     }
 
     private void ReleaseWall()
@@ -429,8 +449,6 @@ public class PlayerSideController : MonoBehaviour
             animator.SetBool("IsWallGrabbing", false);
             animator.SetBool("IsOnWall", false);
         }
-
-        Debug.Log("Отцепился от стены");
     }
 
     private void JumpFromWall()
@@ -438,16 +456,10 @@ public class PlayerSideController : MonoBehaviour
         if (!isWallGrabbing || isClimbing) return;
 
         float horizontalDir = -Mathf.Sign(wallNormal.x);
-
         float horizontalPower = wallJumpHorizontalForce;
         float verticalPower = wallJumpUpForce * wallJumpUpMultiplier;
 
-        rb.velocity = new Vector3(
-            horizontalDir * horizontalPower,
-            verticalPower,
-            0f
-        );
-
+        rb.velocity = new Vector3(horizontalDir * horizontalPower, verticalPower, 0f);
         ReleaseWall();
 
         if (animator != null)
@@ -459,8 +471,6 @@ public class PlayerSideController : MonoBehaviour
 
         if (footstepScript != null)
             footstepScript.PlayTakeoffSound();
-
-        Debug.Log($"Прыжок от стены! Вертикальная сила: {verticalPower}");
     }
 
     private void HandleCrouch()
@@ -503,7 +513,7 @@ public class PlayerSideController : MonoBehaviour
 
         if (playerCollider == null)
         {
-            Debug.LogError("CapsuleCollider не найден на персонаже!");
+            Debug.LogError("CapsuleCollider не найден!");
             return;
         }
 
@@ -611,48 +621,6 @@ public class PlayerSideController : MonoBehaviour
         if (animator != null) animator.SetBool("IsSprinting", false);
     }
 
-    private void FixedUpdate()
-    {
-        if (isClimbing)
-        {
-            rb.velocity = Vector3.zero;
-            return;
-        }
-
-        ApplyVariableJumpHeight();
-
-        if (!isMovementLocked && !IsAiming && CanMove && !isDashing && !isWallGrabbing)
-        {
-            float currentMaxSpeed = moveSpeed;
-            if (isSprinting) currentMaxSpeed *= sprintSpeedMultiplier;
-            if (isCrouching) currentMaxSpeed *= crouchSpeedMultiplier;
-
-            float targetSpeed = horizontalInput * currentMaxSpeed;
-
-            if (Mathf.Abs(horizontalInput) > 0.01f && !isWallGrabbing)
-            {
-                bool hittingWall =
-                    Physics.Raycast(transform.position + Vector3.up * 0.2f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
-                    Physics.Raycast(transform.position + Vector3.up * 1f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer) ||
-                    Physics.Raycast(transform.position + Vector3.up * 1.8f, Vector3.right * horizontalInput, wallCheckDistance, groundLayer);
-
-                if (hittingWall) targetSpeed = 0;
-            }
-
-            float speedDiff = targetSpeed - rb.velocity.x;
-            float accelRate = (Mathf.Abs(targetSpeed) > 0.01f) ? acceleration : deceleration;
-            float movement = speedDiff * accelRate * Time.fixedDeltaTime;
-            rb.AddForce(movement * Vector3.right, ForceMode.VelocityChange);
-        }
-
-        if (isWallGrabbing && !isClimbing)
-        {
-            rb.velocity = new Vector3(0f, Mathf.Clamp(rb.velocity.y, -wallSlideSpeed, 2f), 0f);
-        }
-
-        rb.position = new Vector3(rb.position.x, rb.position.y, lockedZ);
-    }
-
     private void ApplyVariableJumpHeight()
     {
         if (rb.velocity.y > 0 && !Input.GetButton("Jump") && !isWallGrabbing && !isClimbing)
@@ -752,38 +720,56 @@ public class PlayerSideController : MonoBehaviour
         }
     }
 
+    // АТАКА ПИНКОМ (вызывается только если меч отключен)
+    private void KickAttack()
+    {
+        if (isWallGrabbing || isClimbing) return;
+
+        StartCoroutine(MovementLockCoroutine(0.3f));
+        rb.velocity = new Vector3(0, rb.velocity.y, 0);
+
+        comboStep = (comboStep == 1) ? 2 : 1;
+        animator.SetInteger("AttackType", comboStep);
+
+        StartCoroutine(AttackAnimationRoutine());
+        animator.SetTrigger("Attack");
+
+        nextAttackTime = Time.time + attackRate;
+    }
+
+    private IEnumerator AttackAnimationRoutine()
+    {
+        if (animator == null) yield break;
+
+        float originalSpeed = animator.speed;
+        animator.speed = attackAnimationSpeed;
+
+        float attackDuration = 0.3f / attackAnimationSpeed;
+        yield return new WaitForSeconds(attackDuration);
+
+        animator.speed = originalSpeed;
+    }
+
+    // Метод для нанесения урона пинком (вызывается из анимации)
     public void Hit()
     {
         Collider[] hitEnemies = Physics.OverlapSphere(attackPoint.position, attackRange, enemyLayer);
 
         foreach (Collider enemy in hitEnemies)
         {
-            EnemyAI enemyAI = enemy.GetComponent<EnemyAI>();
-            if (enemyAI != null)
+            HealthEnemy health = enemy.GetComponent<HealthEnemy>();
+            if (health != null)
             {
-                enemyAI.TakeDamage(attackDamage);
-            }
-
-            if (audioSource != null && kickSound != null)
-            {
-                audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
-                audioSource.PlayOneShot(kickSound, volume);
+                health.TakeDamage(attackDamage);
+                Debug.Log($"Kick hit! Damage {attackDamage} to {enemy.name}");
             }
         }
-    }
 
-    private void Attack()
-    {
-        if (isWallGrabbing || isClimbing) return;
-
-        StartCoroutine(MovementLockCoroutine(0.5f));
-        rb.velocity = new Vector3(0, rb.velocity.y, 0);
-
-        comboStep = (comboStep == 1) ? 2 : 1;
-        animator.SetInteger("AttackType", comboStep);
-        animator.SetTrigger("Attack");
-
-        nextAttackTime = Time.time + attackRate;
+        if (audioSource != null && kickSound != null)
+        {
+            audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
+            audioSource.PlayOneShot(kickSound, volume);
+        }
     }
 
     private void ApplyJump()
@@ -816,17 +802,12 @@ public class PlayerSideController : MonoBehaviour
         float animSpeed = isGrounded ? moveMagnitude : 0f;
         float speedMultiplier = isSprinting ? 2f : 1f;
         animator.SetFloat("Speed", moveMagnitude * (isSprinting ? 2f : 1f));
-        animator.SetFloat("Speed", animSpeed * speedMultiplier);
-        animator.SetBool("IsCrouching", isCrouching);
 
         if (isCrouching)
         {
             float crouchAnimSpeed = (moveMagnitude > 0.01f) ? 1.0f : 0.0f;
             animator.SetFloat("CrouchSpeed", crouchAnimSpeed);
         }
-
-        animator.SetFloat("Speed", animSpeed);
-        animator.SetFloat("Speed", animSpeed * speedMultiplier);
 
         if (!isGrounded && rb.velocity.y > 0.5f && !isWallGrabbing && !isClimbing)
         {
@@ -842,23 +823,10 @@ public class PlayerSideController : MonoBehaviour
 
         if (isWallGrabbing && !isClimbing)
         {
-            // Устанавливаем конкретный кадр для виса
             animator.Play("WallHang", 0, hangAnimationFrame);
         }
 
         animator.SetBool("IsClimbing", isClimbing);
-    }
-
-    public void UnlockJump()
-    {
-        canJump = true;
-        Debug.Log("Прыжок разблокирован!");
-    }
-
-    public void UnlockWallGrab()
-    {
-        canWallGrabAbility = true;
-        Debug.Log("Цепляние за стены разблокировано!");
     }
 
     private void HandleRotation()
@@ -919,6 +887,29 @@ public class PlayerSideController : MonoBehaviour
         StartCoroutine(MovementLockCoroutine(duration));
     }
 
+    public void UnlockJump()
+    {
+        canJump = true;
+        Debug.Log("Прыжок разблокирован!");
+    }
+
+    public void UnlockWallGrab()
+    {
+        canWallGrabAbility = true;
+        Debug.Log("Цепляние за стены разблокировано!");
+    }
+
+    public void SetUseSword(bool useSword)
+    {
+        useSwordInsteadOfKick = useSword;
+    }
+
+    public bool IsSwordAttackEnabled()
+    {
+        return useSwordInsteadOfKick && swordCombat != null;
+    }
+
+
     private void OnDrawGizmosSelected()
     {
         if (groundCheck != null)
@@ -932,43 +923,5 @@ public class PlayerSideController : MonoBehaviour
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(attackPoint.position, attackRange);
         }
-
-        Gizmos.color = Color.cyan;
-        Vector3 origin = transform.position + Vector3.up * 0.5f;
-        Gizmos.DrawRay(origin, Vector3.right * wallGrabCheckDistance);
-        Gizmos.DrawRay(origin, Vector3.left * wallGrabCheckDistance);
-        Gizmos.DrawRay(transform.position + Vector3.up * 1.2f, Vector3.right * wallGrabCheckDistance);
-        Gizmos.DrawRay(transform.position + Vector3.up * 1.2f, Vector3.left * wallGrabCheckDistance);
-
-        Gizmos.color = Color.green;
-        Gizmos.DrawRay(transform.position + Vector3.up * climbCheckHeight, Vector3.right * climbCheckDistance * (facingRight ? 1 : -1));
-        float direction = facingRight ? 1f : -1f;
-        Vector3 checkDir = Vector3.right * direction;
-
-        // Красный луч - проверка препятствия над головой
-        Gizmos.color = Color.red;
-        Gizmos.DrawRay(transform.position + Vector3.up * climbCheckHeight, checkDir * climbCheckDistance);
-
-        // Желтый луч - проверка самой поверхности (куда встанем)
-        Gizmos.color = Color.yellow;
-        Vector3 ledgeCheckStart = transform.position + Vector3.up * climbCheckHeight + checkDir * climbCheckDistance;
-        Gizmos.DrawRay(ledgeCheckStart, Vector3.down * 1.0f);
-
-        
-
-        // Синий луч - проверка на уровне груди
-        Gizmos.color = Color.blue;
-        Gizmos.DrawRay(transform.position + Vector3.up * chest, checkDir * wallGrabCheckDistance);
-
-        // Малиновый луч - проверка на уровне ног
-        Gizmos.color = Color.magenta;
-        Gizmos.DrawRay(transform.position + Vector3.up * feet, checkDir * wallGrabCheckDistance);
-
-       
-
-        // Бирюзовый луч — показывает, как код ищет край платформы сверху вниз
-        Gizmos.color = Color.cyan;
-        Vector3 rayStart = transform.position + Vector3.up * climbCheckHeight + checkDir * (wallGrabCheckDistance + 0.1f);
-        Gizmos.DrawRay(rayStart, Vector3.down * climbCheckHeight);
     }
 }

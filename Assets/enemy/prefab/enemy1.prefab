@@ -171,6 +171,7 @@ GameObject:
   - component: {fileID: 8427782458658483080}
   - component: {fileID: 90924884986306925}
   - component: {fileID: 2417218347024992213}
+  - component: {fileID: 3384297241156582434}
   m_Layer: 8
   m_Name: enemy1
   m_TagString: Enemy
@@ -235,7 +236,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   currentState: 0
-  maxHealth: 75
   walkSpeed: 0.1
   chaseSpeed: 0.2
   patrolRadius: 5
@@ -245,8 +245,6 @@ MonoBehaviour:
   anim: {fileID: 2417218347024992213}
   audioSource: {fileID: 8841064371901526566}
   screamSound: {fileID: 8300000, guid: 1169f6e1063891c4eaf96598095dfd36, type: 3}
-  hitSound: {fileID: 8300000, guid: c8faf0c9e0560e74fba79b04a7c90ad1, type: 3}
-  deathSound: {fileID: 8300000, guid: 1169f6e1063891c4eaf96598095dfd36, type: 3}
   attackPoint: {fileID: 6722887384946155742}
   attackRange: 0.2
   playerLayer:
@@ -274,6 +272,19 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!114 &3384297241156582434
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6434849887142173844}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: db0eb7839dae1cb4588e9b8ae0b06143, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxHealth: 100
 --- !u!1001 &82862204399664105
 PrefabInstance:
   m_ObjectHideFlags: 0

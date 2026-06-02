@@ -4,14 +4,8 @@ using System.Collections;
 
 public class EnemyAI : MonoBehaviour
 {
-    // Добавляем состояние Death в enum
-    public enum State { Idle, Patrol, Chase, Attack, Death }
+    public enum State { Idle, Patrol, Chase, Attack }
     public State currentState = State.Idle;
-
-    [Header("Настройки здоровья")]
-    public int maxHealth = 100;
-    private int currentHealth;
-    private bool isDead = false;
 
     [Header("Настройки движения")]
     public float walkSpeed = 2f;
@@ -25,13 +19,6 @@ public class EnemyAI : MonoBehaviour
     public Animator anim;
     public AudioSource audioSource;
     public AudioClip screamSound;
-    public AudioClip hitSound; // Звук при получении урона
-    public AudioClip deathSound; // Звук смерти
-
-    private Vector3 startPosition;
-    private Vector3 patrolTarget;
-    private bool hasScreamed = false;
-    private float stateTimer;
 
     [Header("Настройки атаки")]
     public Transform attackPoint;
@@ -39,20 +26,63 @@ public class EnemyAI : MonoBehaviour
     public LayerMask playerLayer;
     public int damage = 10;
 
-    private float lockedZ; // Переменная для хранения Z
+    private Vector3 startPosition;
+    private Vector3 patrolTarget;
+    private bool hasScreamed = false;
+    private float stateTimer;
+
+    private HealthEnemy health; // Ссылка на компонент здоровья
+    private bool isDead = false;
 
     void Start()
     {
-        currentHealth = maxHealth; // Инициализация здоровья
+        // Получаем компонент здоровья
+        health = GetComponent<HealthEnemy>();
+        if (health == null)
+        {
+            Debug.LogError("HealthEnemy компонент не найден на " + gameObject.name);
+            return;
+        }
+
+        // Подписываемся на события смерти
+        health.OnDeath += HandleDeath;
+
         startPosition = transform.position;
         SetNewPatrolTarget();
         player = GameObject.FindGameObjectWithTag("Player").transform;
-        lockedZ = transform.position.z;
+    }
+
+    void OnDestroy()
+    {
+        // Отписываемся от событий
+        if (health != null)
+            health.OnDeath -= HandleDeath;
+    }
+
+    void HandleDeath()
+    {
+        isDead = true;
+
+        // Отключаем физику, чтобы тело не мешало игроку
+        if (GetComponent<Collider>())
+            GetComponent<Collider>().enabled = false;
+        if (GetComponent<Rigidbody>())
+            GetComponent<Rigidbody>().isKinematic = true;
+
+        // Анимация смерти
+        if (anim != null)
+        {
+            int randomDeath = Random.Range(1, 3);
+            anim.SetTrigger("die");
+        }
+
+        // Удаляем объект через 5 секунд
+        Destroy(gameObject, 5f);
     }
 
     void Update()
     {
-        if (isDead) return; // Если мертв, ничего не делаем
+        if (isDead || health == null || health.IsDead()) return;
 
         float distanceToPlayer = Mathf.Abs(transform.position.x - player.position.x);
         float fullDistance = Vector3.Distance(transform.position, player.position);
@@ -64,59 +94,26 @@ public class EnemyAI : MonoBehaviour
             case State.Chase: UpdateChaseState(distanceToPlayer); break;
             case State.Attack: UpdateAttackState(distanceToPlayer); break;
         }
-      
     }
 
-    // --- НОВЫЙ МЕТОД: ПОЛУЧЕНИЕ УРОНА ---
+    // Публичный метод для получения урона (прокси для HealthEnemy)
     public void TakeDamage(int damageAmount)
     {
-        
-        if (isDead) return;
-        Debug.Log(gameObject.name + " получил урон: " + damageAmount); // Это должно появиться в консоли
-
-        currentHealth -= damageAmount;
-        
-
-        if (audioSource && hitSound) audioSource.PlayOneShot(hitSound);
-
-        if (currentHealth > 0) anim.SetTrigger("getHit");
-        if (currentHealth <= 0) Die();
-        if (currentState == State.Idle || currentState == State.Patrol)
+        if (health != null && !health.IsDead())
         {
-            TransitionToChase();
+            health.TakeDamage(damageAmount);
+
+            // Если враг получил урон и был в состоянии Idle или Patrol - переходим в погоню
+            if (!health.IsDead() && (currentState == State.Idle || currentState == State.Patrol))
+            {
+                TransitionToChase();
+            }
         }
-
-        
     }
-
-    void Die()
-    {
-        isDead = true;
-        currentState = State.Death;
-
-        // Звук смерти
-        if (audioSource && deathSound) audioSource.PlayOneShot(deathSound);
-
-        // Отключаем физику, чтобы тело не мешало игроку
-        if (GetComponent<Collider>()) GetComponent<Collider>().enabled = false;
-        if (GetComponent<Rigidbody>()) GetComponent<Rigidbody>().isKinematic = true;
-
-        // Анимация смерти
-        int randomDeath = Random.Range(1, 3);
-        //anim.SetInteger("deathType", randomDeath);
-        anim.SetTrigger("die");
-
-        Debug.Log("Враг повержен!");
-
-        // Опционально: удалить объект через 5 секунд
-        Destroy(gameObject, 5f);
-    }
-
-    // --- Логика состояний (Остается вашей) ---
 
     void UpdateIdleState(float distance)
     {
-        anim.SetBool("isWalking", false);
+        if (anim != null) anim.SetBool("isWalking", false);
         stateTimer -= Time.deltaTime;
         if (distance < detectionRange) TransitionToChase();
         else if (stateTimer <= 0) currentState = State.Patrol;
@@ -124,17 +121,15 @@ public class EnemyAI : MonoBehaviour
 
     void UpdatePatrolState(float distance)
     {
-        anim.SetBool("isWalking", true);
+        if (anim != null) anim.SetBool("isWalking", true);
 
         // Пускаем луч вперед на небольшое расстояние
         Vector3 direction = (patrolTarget.x > transform.position.x) ? Vector3.right : Vector3.left;
         RaycastHit hit;
 
-        // Проверяем, нет ли стены впереди (на расстоянии 0.7 метра)
-        // Убедитесь, что стены имеют слой, который вы укажете (например, "Ground")
+        // Проверяем, нет ли стены впереди
         if (Physics.Raycast(transform.position + Vector3.up, direction, out hit, 0.7f))
         {
-            // Если луч попал в стену - останавливаемся и меняем цель
             StopAndPickNewTarget();
             return;
         }
@@ -157,31 +152,30 @@ public class EnemyAI : MonoBehaviour
 
     void UpdateChaseState(float xDistance)
     {
-        anim.SetBool("isWalking", true);
+        if (anim != null) anim.SetBool("isWalking", true);
         MoveTowards(player.position, chaseSpeed);
         if (xDistance <= stopDistance) currentState = State.Attack;
     }
 
     void UpdateAttackState(float distance)
     {
-        anim.SetBool("isWalking", false);
+        if (anim != null) anim.SetBool("isWalking", false);
         LookAtTarget(player.position);
         stateTimer -= Time.deltaTime;
         if (stateTimer <= 0)
         {
-            anim.SetTrigger("punch");
+            if (anim != null) anim.SetTrigger("punch");
             stateTimer = 1.5f;
         }
         if (distance > stopDistance + 0.2f) currentState = State.Chase;
     }
 
-    // --- Помощники ---
-
     void TransitionToChase()
     {
         if (!hasScreamed)
         {
-            if (audioSource && screamSound) audioSource.PlayOneShot(screamSound);
+            if (audioSource != null && screamSound != null)
+                audioSource.PlayOneShot(screamSound);
             hasScreamed = true;
         }
         currentState = State.Chase;
@@ -215,7 +209,8 @@ public class EnemyAI : MonoBehaviour
 
     public void EnemyAttackHit()
     {
-        if (attackPoint == null || isDead) return;
+        if (attackPoint == null || isDead || (health != null && health.IsDead())) return;
+
         Collider[] hitPlayers = Physics.OverlapSphere(attackPoint.position, attackRange, playerLayer);
         foreach (Collider playerObj in hitPlayers)
         {

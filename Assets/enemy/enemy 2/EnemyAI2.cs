@@ -2,6 +2,7 @@ using System.Collections;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(HealthEnemy))]
 public class EnemyAI3D : MonoBehaviour
 {
     [Header("Движение и Обнаружение")]
@@ -12,8 +13,6 @@ public class EnemyAI3D : MonoBehaviour
     public float flipSpeed = 12f;
 
     [Header("Параметры Боя")]
-    public int maxHealth = 100;
-    private int currentHealth;
     public float attackCooldown = 1.5f;
     public int attackDamage = 15;
     public float attackAnimationSpeed = 1.5f;
@@ -21,27 +20,43 @@ public class EnemyAI3D : MonoBehaviour
     public float attackRadius = 1f;
     public LayerMask playerLayer;
 
+    [Header("Звуки")]
+    public AudioSource audioSource;
+    public AudioClip screamSound;
+
     private Transform player;
     private Animator anim;
     private Rigidbody rb;
+    private HealthEnemy health;
 
-    private enum EnemyState { Idle, Patrol, Chase, Attack, Rage, Hit, Dead }
+    private enum EnemyState { Idle, Patrol, Chase, Attack, Rage, Hit }
     private EnemyState currentState = EnemyState.Idle;
 
     private bool isFacingRight = true;
     private float targetRotationY = 90f;
     private bool canAttack = true;
-    private bool isDead = false;
     private int comboStep = 1;
     private bool isPerformingAction = false;
     private float originalAnimationSpeed;
     private Coroutine stateMachineCoroutine;
+    private bool hasScreamed = false;
+    private float originalRunSpeed;
+    private float originalAttackCooldown;
 
     void Start()
     {
         anim = GetComponent<Animator>();
         rb = GetComponent<Rigidbody>();
-        currentHealth = maxHealth;
+        health = GetComponent<HealthEnemy>();
+
+        if (health == null)
+        {
+            Debug.LogError("HealthEnemy компонент не найден на " + gameObject.name);
+            return;
+        }
+
+        originalRunSpeed = runSpeed;
+        originalAttackCooldown = attackCooldown;
 
         if (anim != null)
             originalAnimationSpeed = anim.speed;
@@ -50,20 +65,58 @@ public class EnemyAI3D : MonoBehaviour
 
         GameObject playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null)
-        {
             player = playerObj.transform;
-        }
 
-        // Запускаем StateMachine только если враг жив
-        if (!isDead && stateMachineCoroutine == null)
+        health.OnDeath += HandleDeath;
+
+        if (!health.IsDead() && stateMachineCoroutine == null)
         {
             stateMachineCoroutine = StartCoroutine(StateMachineRoutine());
         }
     }
 
+    void OnDestroy()
+    {
+        if (health != null)
+            health.OnDeath -= HandleDeath;
+    }
+
+    void HandleDeath()
+    {
+        Debug.Log("EnemyAI3D: HandleDeath вызван!");
+
+        if (stateMachineCoroutine != null)
+        {
+            StopCoroutine(stateMachineCoroutine);
+            stateMachineCoroutine = null;
+        }
+
+        StopAllCoroutines();
+        isPerformingAction = true;
+        canAttack = false;
+
+        if (rb != null)
+        {
+            rb.velocity = Vector3.zero;
+            rb.isKinematic = true;
+        }
+
+        Collider col = GetComponent<Collider>();
+        if (col != null)
+            col.enabled = false;
+
+        if (anim != null)
+        {
+            anim.speed = originalAnimationSpeed;
+            ResetAllVelocityAnims();
+        }
+
+        Destroy(gameObject, 3f);
+    }
+
     void Update()
     {
-        if (isDead || isPerformingAction) return;
+        if (health == null || health.IsDead() || isPerformingAction) return;
 
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, targetRotationY, 0), Time.deltaTime * flipSpeed);
 
@@ -71,7 +124,7 @@ public class EnemyAI3D : MonoBehaviour
 
         float distanceToPlayer = Vector3.Distance(transform.position, player.position);
 
-        if (currentState != EnemyState.Attack && currentState != EnemyState.Hit && currentState != EnemyState.Dead)
+        if (currentState != EnemyState.Attack && currentState != EnemyState.Hit)
         {
             if (distanceToPlayer <= attackRange)
             {
@@ -79,6 +132,11 @@ public class EnemyAI3D : MonoBehaviour
             }
             else if (distanceToPlayer <= chaseRange)
             {
+                if (!hasScreamed && screamSound != null && audioSource != null)
+                {
+                    audioSource.PlayOneShot(screamSound);
+                    hasScreamed = true;
+                }
                 SwitchState(EnemyState.Chase);
             }
             else if (currentState == EnemyState.Chase)
@@ -90,7 +148,7 @@ public class EnemyAI3D : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (isDead || isPerformingAction || currentState == EnemyState.Dead)
+        if (health == null || health.IsDead() || isPerformingAction)
         {
             if (rb != null)
                 rb.velocity = new Vector3(0, rb.velocity.y, 0);
@@ -102,8 +160,7 @@ public class EnemyAI3D : MonoBehaviour
             MoveTowardsPlayer();
         }
 
-        // Patrol движение через FixedUpdate для плавности
-        if (currentState == EnemyState.Patrol && !isPerformingAction && !isDead && player == null)
+        if (currentState == EnemyState.Patrol && !isPerformingAction && player == null)
         {
             float moveX = isFacingRight ? walkSpeed : -walkSpeed;
             rb.velocity = new Vector3(moveX, rb.velocity.y, 0);
@@ -131,7 +188,7 @@ public class EnemyAI3D : MonoBehaviour
 
     IEnumerator StateMachineRoutine()
     {
-        while (!isDead && currentState != EnemyState.Dead)
+        while (!health.IsDead())
         {
             switch (currentState)
             {
@@ -150,12 +207,6 @@ public class EnemyAI3D : MonoBehaviour
                 case EnemyState.Hit:
                     yield return StartCoroutine(HitRoutine());
                     break;
-                case EnemyState.Dead:
-                    yield return null;
-                    break;
-                default:
-                    yield return null;
-                    break;
             }
             yield return null;
         }
@@ -163,7 +214,7 @@ public class EnemyAI3D : MonoBehaviour
 
     IEnumerator IdleRoutine()
     {
-        if (isDead || anim == null) yield break;
+        if (anim == null) yield break;
 
         string idleAnim = Random.Range(0, 2) == 0 ? "idle1" : "idle2";
         anim.SetBool(idleAnim, true);
@@ -173,13 +224,13 @@ public class EnemyAI3D : MonoBehaviour
         float idleTime = Random.Range(2f, 4f);
         float timer = 0;
 
-        while (timer < idleTime && currentState == EnemyState.Idle && !isPerformingAction && !isDead)
+        while (timer < idleTime && currentState == EnemyState.Idle && !isPerformingAction)
         {
             timer += Time.deltaTime;
             yield return null;
         }
 
-        if (currentState == EnemyState.Idle && !isPerformingAction && !isDead)
+        if (currentState == EnemyState.Idle && !isPerformingAction)
         {
             SwitchState(EnemyState.Patrol);
         }
@@ -187,7 +238,7 @@ public class EnemyAI3D : MonoBehaviour
 
     IEnumerator PatrolRoutine()
     {
-        if (isDead || anim == null) yield break;
+        if (anim == null) yield break;
 
         anim.SetBool("walk", true);
         anim.SetBool("run", false);
@@ -195,14 +246,13 @@ public class EnemyAI3D : MonoBehaviour
         float patrolTime = Random.Range(3f, 5f);
         float timer = 0;
 
-        while (timer < patrolTime && currentState == EnemyState.Patrol && !isPerformingAction && !isDead)
+        while (timer < patrolTime && currentState == EnemyState.Patrol && !isPerformingAction)
         {
-            // Движение теперь в FixedUpdate
             timer += Time.deltaTime;
             yield return null;
         }
 
-        if (currentState == EnemyState.Patrol && !isPerformingAction && !isDead)
+        if (currentState == EnemyState.Patrol && !isPerformingAction)
         {
             Flip();
             SwitchState(EnemyState.Idle);
@@ -211,16 +261,16 @@ public class EnemyAI3D : MonoBehaviour
 
     IEnumerator AttackRoutine()
     {
-        if (isDead || anim == null) yield break;
+        if (anim == null) yield break;
 
         isPerformingAction = true;
         canAttack = false;
 
         rb.velocity = new Vector3(0, rb.velocity.y, 0);
+
         anim.SetBool("walk", false);
         anim.SetBool("run", false);
 
-        // Ускоряем анимацию атаки
         float previousSpeed = anim.speed;
         anim.speed = attackAnimationSpeed;
 
@@ -233,8 +283,7 @@ public class EnemyAI3D : MonoBehaviour
         float attackAnimLength = 0.9f / attackAnimationSpeed;
         yield return new WaitForSeconds(attackAnimLength);
 
-        // Восстанавливаем скорость
-        if (!isDead && anim != null)
+        if (!health.IsDead() && anim != null)
             anim.speed = previousSpeed;
 
         yield return new WaitForSeconds(attackCooldown);
@@ -242,7 +291,7 @@ public class EnemyAI3D : MonoBehaviour
         canAttack = true;
         isPerformingAction = false;
 
-        if (!isDead && currentState != EnemyState.Dead)
+        if (!health.IsDead())
         {
             SwitchState(EnemyState.Idle);
         }
@@ -250,17 +299,16 @@ public class EnemyAI3D : MonoBehaviour
 
     IEnumerator HitRoutine()
     {
-        if (isDead || anim == null) yield break;
+        if (anim == null) yield break;
 
         isPerformingAction = true;
-        rb.velocity = new Vector3(0, rb.velocity.y, 0);
 
+        rb.velocity = new Vector3(0, rb.velocity.y, 0);
         anim.SetTrigger("gethit");
 
         yield return new WaitForSeconds(0.5f);
 
-        // Проверяем условие для ярости
-        if (currentHealth < maxHealth * 0.4f && !isDead && anim != null)
+        if (!health.IsDead() && health.GetHealthPercent() < 0.4f)
         {
             anim.SetTrigger("rage");
             runSpeed *= 1.3f;
@@ -270,43 +318,32 @@ public class EnemyAI3D : MonoBehaviour
 
         isPerformingAction = false;
 
-        if (!isDead && currentState != EnemyState.Dead)
+        if (!health.IsDead())
         {
             canAttack = true;
             SwitchState(EnemyState.Idle);
+            if (stateMachineCoroutine == null)
+                stateMachineCoroutine = StartCoroutine(StateMachineRoutine());
         }
     }
 
     void SwitchState(EnemyState newState)
     {
-        if (isDead || currentState == EnemyState.Dead)
-            return;
+        if (health == null || health.IsDead()) return;
+        if (currentState == newState) return;
+        if (isPerformingAction && newState != EnemyState.Hit) return;
 
-        if (currentState == newState)
-            return;
-
-        // Нельзя переключаться во время действия
-        if (isPerformingAction && newState != EnemyState.Hit && newState != EnemyState.Dead)
-            return;
-
-        // Очищаем анимации при смене состояния
-        if (currentState != EnemyState.Attack && currentState != EnemyState.Hit && anim != null)
+        if (anim != null && currentState != EnemyState.Attack && currentState != EnemyState.Hit)
         {
             ResetAllVelocityAnims();
         }
 
         currentState = newState;
-
-        // Если перешли в состояние Dead - вызываем смерть
-        if (currentState == EnemyState.Dead)
-        {
-            Die();
-        }
     }
 
     public void EnemyPerformAttackDamage()
     {
-        if (isDead || attackPoint == null) return;
+        if (health == null || health.IsDead() || attackPoint == null) return;
 
         Collider[] hitPlayers = Physics.OverlapSphere(attackPoint.position, attackRadius, playerLayer);
 
@@ -325,96 +362,10 @@ public class EnemyAI3D : MonoBehaviour
 
     public void TakeDamage(int damage)
     {
-        if (isDead) return;
-
-        // Нельзя получить урон во время смерти
-        if (currentState == EnemyState.Dead) return;
-
-        currentHealth -= damage;
-
-        // Останавливаем все текущие действия
-        if (stateMachineCoroutine != null)
+        if (health != null && !health.IsDead())
         {
-            StopCoroutine(stateMachineCoroutine);
-            stateMachineCoroutine = null;
+            health.TakeDamage(damage);
         }
-
-        isPerformingAction = false;
-
-        if (anim != null)
-        {
-            ResetAllVelocityAnims();
-            // Восстанавливаем скорость анимации если она была изменена
-            anim.speed = originalAnimationSpeed;
-        }
-
-        if (rb != null)
-            rb.velocity = new Vector3(0, rb.velocity.y, 0);
-
-        if (currentHealth <= 0)
-        {
-            // Переключаемся в состояние смерти
-            SwitchState(EnemyState.Dead);
-        }
-        else
-        {
-            currentState = EnemyState.Hit;
-            // Запускаем HitRoutine напрямую, не через StateMachine
-            StartCoroutine(HitAndRestoreRoutine());
-        }
-    }
-
-    IEnumerator HitAndRestoreRoutine()
-    {
-        yield return StartCoroutine(HitRoutine());
-
-        // Перезапускаем StateMachine если враг еще жив
-        if (!isDead && currentState != EnemyState.Dead && stateMachineCoroutine == null)
-        {
-            stateMachineCoroutine = StartCoroutine(StateMachineRoutine());
-        }
-    }
-
-    void Die()
-    {
-        if (isDead) return;
-
-        isDead = true;
-        currentState = EnemyState.Dead;
-        isPerformingAction = true; // Блокируем любые действия
-
-        // Останавливаем все корутины
-        if (stateMachineCoroutine != null)
-        {
-            StopCoroutine(stateMachineCoroutine);
-            stateMachineCoroutine = null;
-        }
-
-        StopAllCoroutines();
-
-        // Останавливаем движение
-        if (rb != null)
-        {
-            rb.velocity = Vector3.zero;
-            rb.isKinematic = true;
-        }
-
-        // Отключаем коллайдер
-        Collider col = GetComponent<Collider>();
-        if (col != null)
-            col.enabled = false;
-
-        // Восстанавливаем скорость анимации
-        if (anim != null)
-        {
-            anim.speed = originalAnimationSpeed;
-            // Сбрасываем все анимации и запускаем смерть
-            ResetAllVelocityAnims();
-            anim.SetTrigger("death");
-        }
-
-        // Уничтожаем объект через 3 секунды
-        Destroy(gameObject, 3f);
     }
 
     void Flip()
