@@ -151,6 +151,13 @@ public class PlayerSideController : MonoBehaviour
         {
             swordCombat = GetComponent<PlayerCombat>();
         }
+        // Добавьте в любой скрипт, который активен в меню
+        
+            // Показываем курсор
+            Cursor.visible = true;
+            // Снимаем блокировку курсора
+            Cursor.lockState = CursorLockMode.None;
+        
     }
 
     private void Awake()
@@ -260,6 +267,12 @@ public class PlayerSideController : MonoBehaviour
         HandleRotation();
         UpdateAnimations();
         CheckFallingState();
+    }
+
+    // Добавьте в PlayerSideController
+    public bool IsFacingRight()
+    {
+        return facingRight;
     }
 
     private void FixedUpdate()

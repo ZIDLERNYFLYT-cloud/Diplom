@@ -581,7 +581,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   firstObject: {fileID: 391423943}
-  delayBeforeFirstDisable: 5
+  delayBeforeFirstDisable: 8
   secondObject: {fileID: 0}
   delayBeforeSecondDisable: 3
 --- !u!1 &397641805

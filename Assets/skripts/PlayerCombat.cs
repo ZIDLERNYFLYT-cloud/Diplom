@@ -4,14 +4,16 @@ using System.Collections.Generic;
 
 public class PlayerCombat : MonoBehaviour
 {
-    [Header("Основные настройки атаки")]
-    public int damage = 25;
+    [Header("Визуализация меча")]
+    public GameObject swordModel; // Перетащи сюда 3D модель/спрайт меча в инспекторе
+
+    [Header("Основные настройки")]
     public LayerMask enemyLayers;
 
     [Header("Комбо система")]
     public int maxComboSteps = 4;
     public float resetComboAfter = 1.5f;
-    public float attackCooldown = 0.3f; // Минимальная задержка между атаками
+    public float attackCooldown = 0.15f;
 
     [Header("Привязки анимаций")]
     public Animator anim;
@@ -26,7 +28,6 @@ public class PlayerCombat : MonoBehaviour
     public ParticleSystem slashParticle;
 
     [Header("Настройки линий")]
-    public Color slashColor = new Color(0, 0.5f, 1f, 0.8f);
     public float slashDuration = 0.1f;
     public AnimationCurve slashWidthCurve = AnimationCurve.EaseInOut(0, 0.3f, 1, 0);
 
@@ -51,18 +52,17 @@ public class PlayerCombat : MonoBehaviour
     private float lastAttackTime = 0f;
     private float lastComboTime = 0f;
     private bool isAttacking = false;
-    private bool pendingNextAttack = false; // Ожидание следующей атаки
+    private bool pendingNextAttack = false;
+    private PlayerSideController playerController;
 
-    // Для управления корутинами
-    private Coroutine currentDamageCoroutine;
     private Coroutine currentSlashCoroutine;
     private Coroutine currentGhostCoroutine;
 
     [System.Serializable]
     public class SwordSettings
     {
+        public int damage = 25; // Разный урон для каждого шага в инспекторе!
         public float swordLength = 1.5f;
-        public float damageDelay = 0.2f;
         public float swordAngle = 0f;
         public Color swordColor = new Color(0, 0.5f, 1f, 0.8f);
         public Vector2 startPointOffset = Vector2.zero;
@@ -74,6 +74,7 @@ public class PlayerCombat : MonoBehaviour
     {
         if (anim == null) anim = GetComponent<Animator>();
         if (audioSource == null) audioSource = GetComponent<AudioSource>();
+        playerController = GetComponent<PlayerSideController>();
 
         if (attackStartPoint == null || attackEndPoint == null)
         {
@@ -82,6 +83,8 @@ public class PlayerCombat : MonoBehaviour
 
         SetupSwordSettings();
         SetupLineRenderer();
+
+        if (swordModel != null) swordModel.SetActive(false);
     }
 
     void SetupAttackPoints()
@@ -111,8 +114,8 @@ public class PlayerCombat : MonoBehaviour
             for (int i = 0; i < maxComboSteps; i++)
             {
                 swordSettings[i] = new SwordSettings();
+                swordSettings[i].damage = 25 + (i * 10); // Урон по умолчанию: 25, 35, 45, 55
                 swordSettings[i].swordLength = 1.5f + (i * 0.2f);
-                swordSettings[i].damageDelay = 0.15f + (i * 0.03f);
                 swordSettings[i].swordAngle = i * 10f;
                 swordSettings[i].useCustomPoints = false;
             }
@@ -129,31 +132,25 @@ public class PlayerCombat : MonoBehaviour
         }
 
         slashLine.positionCount = 2;
-        slashLine.startWidth = 0.15f;
-        slashLine.endWidth = 0.03f;
+        slashLine.startWidth = 0.25f;
+        slashLine.endWidth = 0.05f;
+        slashLine.numCapVertices = 10;
+        slashLine.numCornerVertices = 10;
         slashLine.material = new Material(Shader.Find("Sprites/Default"));
         slashLine.enabled = false;
     }
 
     void Update()
     {
-        // Проверяем нажатие атаки
-        if (Input.GetButtonDown("Fire1"))
+        if ((Input.GetButtonDown("Fire1") || Input.GetKeyDown(KeyCode.J)) && !isAttacking && Time.time - lastAttackTime >= attackCooldown)
         {
-            if (!isAttacking && Time.time - lastAttackTime >= attackCooldown)
-            {
-                // Если не атакуем - начинаем атаку
-                Attack();
-            }
-            else if (isAttacking)
-            {
-                // Если атакуем - запоминаем, что нужно начать следующую атаку
-                pendingNextAttack = true;
-                Debug.Log("Attack buffered for next combo step");
-            }
+            Attack();
+        }
+        else if ((Input.GetButtonDown("Fire1") || Input.GetKeyDown(KeyCode.J)) && isAttacking)
+        {
+            pendingNextAttack = true;
         }
 
-        // Сброс комбо по таймеру
         if (Time.time - lastComboTime > resetComboAfter && currentComboStep > 0)
         {
             ResetCombo();
@@ -162,15 +159,15 @@ public class PlayerCombat : MonoBehaviour
 
     void Attack()
     {
-        // Останавливаем предыдущие корутины
         StopAllAttackCoroutines();
 
         isAttacking = true;
         lastAttackTime = Time.time;
         lastComboTime = Time.time;
-        pendingNextAttack = false; // Сбрасываем ожидание
+        pendingNextAttack = false;
 
-        // Увеличиваем шаг комбо
+        if (swordModel != null) swordModel.SetActive(true);
+
         if (currentComboStep < maxComboSteps)
         {
             currentComboStep++;
@@ -179,15 +176,12 @@ public class PlayerCombat : MonoBehaviour
         {
             ResetCombo();
             currentComboStep = 1;
+            if (swordModel != null) swordModel.SetActive(true);
         }
 
-        Debug.Log($"Attacking! Combo step: {currentComboStep}");
-
-        // Запускаем анимацию
         string triggerName = attackTriggers[currentComboStep - 1];
         if (anim != null)
         {
-            // Сбрасываем все триггеры атаки
             foreach (string trigger in attackTriggers)
             {
                 anim.ResetTrigger(trigger);
@@ -197,7 +191,6 @@ public class PlayerCombat : MonoBehaviour
 
         PlayAttackSound();
 
-        // Запускаем визуальные эффекты
         if (enableGhostSword)
         {
             currentGhostCoroutine = StartCoroutine(SpawnGhostSwords());
@@ -205,33 +198,13 @@ public class PlayerCombat : MonoBehaviour
 
         currentSlashCoroutine = StartCoroutine(ShowSlashLineWithAnimation());
 
-        // Запускаем нанесение урона (через задержку или Animation Event)
-        SwordSettings settings = GetCurrentSwordSettings();
-        currentDamageCoroutine = StartCoroutine(DealDamageWithDelay(settings.damageDelay));
+        // УРОН ТЕПЕРЬ НЕ ЗАПУСКАЕТСЯ ОТСЮДА АВТОМАТИЧЕСКИ!
     }
 
-    void StopAllAttackCoroutines()
+    // ВАЖНО: Этот метод вызывай из Animation Event в момент самого взмаха
+    public void ExecuteSwordAttackDamage()
     {
-        if (currentDamageCoroutine != null)
-            StopCoroutine(currentDamageCoroutine);
-        if (currentSlashCoroutine != null)
-            StopCoroutine(currentSlashCoroutine);
-        if (currentGhostCoroutine != null)
-            StopCoroutine(currentGhostCoroutine);
-    }
-
-    SwordSettings GetCurrentSwordSettings()
-    {
-        if (currentComboStep <= swordSettings.Length)
-        {
-            return swordSettings[currentComboStep - 1];
-        }
-        return swordSettings[swordSettings.Length - 1];
-    }
-
-    IEnumerator DealDamageWithDelay(float delay)
-    {
-        yield return new WaitForSeconds(delay);
+        Debug.Log($"[Combat Log] Ивент сработал! Текущий шаг комбо: {currentComboStep}");
 
         SwordSettings settings = GetCurrentSwordSettings();
         GetAttackPoints(out Vector3 startPoint, out Vector3 endPoint, settings);
@@ -239,12 +212,12 @@ public class PlayerCombat : MonoBehaviour
         Vector3 attackDirection = (endPoint - startPoint).normalized;
         float attackLength = Vector3.Distance(startPoint, endPoint);
 
-        if (slashParticle != null)
-        {
-            slashParticle.Play();
-        }
+        if (slashParticle != null) slashParticle.Play();
 
+        // Находим ВСЕ коллайдеры в радиусе атаки
         Collider[] hitEnemies = Physics.OverlapSphere(startPoint, attackLength, enemyLayers);
+
+        Debug.Log($"[Combat Log] В радиус OverlapSphere попало объектов: {hitEnemies.Length}. Ищем слой: {LayerMask.LayerToName(enemyLayers.value)}");
 
         foreach (Collider enemy in hitEnemies)
         {
@@ -252,65 +225,58 @@ public class PlayerCombat : MonoBehaviour
             float distanceToLine = Vector3.Distance(enemy.transform.position, closestPoint);
             float enemyDot = Vector3.Dot(attackDirection, (enemy.transform.position - startPoint).normalized);
 
-            if (distanceToLine <= 0.8f && enemyDot > 0.2f && enemyDot <= 1.2f)
+            Debug.Log($"[Combat Log] Проверка врага {enemy.name}: Дист до линии = {distanceToLine}, Направление (Dot) = {enemyDot}");
+
+            // Внимание: мы временно увеличили допуски (distanceToLine <= 1.5f), чтобы проверить, не слишком ли строгие были условия
+            if (distanceToLine <= 1.5f && enemyDot > -0.2f && enemyDot <= 1.5f)
             {
                 HealthEnemy enemyHealth = enemy.GetComponent<HealthEnemy>();
                 if (enemyHealth != null)
                 {
-                    enemyHealth.TakeDamage(damage);
+                    Debug.Log($"[Combat Log] УДАР! Наносим {settings.damage} урона врагу {enemy.name}");
+                    enemyHealth.TakeDamage(settings.damage);
 
                     if (hitEffect != null)
-                    {
                         Instantiate(hitEffect, enemy.transform.position, Quaternion.identity);
-                    }
 
                     if (hitSound != null && audioSource != null)
-                    {
                         audioSource.PlayOneShot(hitSound);
-                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"[Combat Log] Коллайдер {enemy.name} найден, но на нем НЕТ компонента HealthEnemy!");
                 }
             }
         }
     }
 
-    // ВАЖНО: Этот метод вызывается в КОНЦЕ анимации атаки
-    // Добавьте Animation Event в конец каждой анимации атаки
+    void StopAllAttackCoroutines()
+    {
+        if (currentSlashCoroutine != null) StopCoroutine(currentSlashCoroutine);
+        if (currentGhostCoroutine != null) StopCoroutine(currentGhostCoroutine);
+    }
+
+    SwordSettings GetCurrentSwordSettings()
+    {
+        if (currentComboStep > 0 && currentComboStep <= swordSettings.Length)
+        {
+            return swordSettings[currentComboStep - 1];
+        }
+        return swordSettings[0];
+    }
+
+    // Метод окончания атаки (вызывай в самом конце анимации)
     public void OnAttackAnimationEnd()
     {
-        Debug.Log($"Attack animation ended! Combo step: {currentComboStep}, Pending: {pendingNextAttack}");
-
-        // Анимация закончилась - снимаем флаг атаки
         isAttacking = false;
 
-        // Если есть ожидающая атака - начинаем следующую
         if (pendingNextAttack && currentComboStep < maxComboSteps)
         {
-            Debug.Log("Starting next combo attack!");
             Attack();
         }
         else if (currentComboStep >= maxComboSteps)
         {
-            // Если это был последний удар - сбрасываем комбо
             ResetCombo();
-        }
-    }
-
-    // Альтернативный метод: если не хотите использовать Animation Events
-    // Вызывайте этот метод в корутине через время, равное длине анимации
-    public void ForceEndAttack()
-    {
-        if (isAttacking)
-        {
-            isAttacking = false;
-
-            if (pendingNextAttack && currentComboStep < maxComboSteps)
-            {
-                Attack();
-            }
-            else if (currentComboStep >= maxComboSteps)
-            {
-                ResetCombo();
-            }
         }
     }
 
@@ -354,6 +320,21 @@ public class PlayerCombat : MonoBehaviour
 
             endPoint = startPoint + attackDirection * settings.swordLength;
         }
+    }
+
+    Vector3 GetAttackDirection()
+    {
+        if (playerController != null)
+        {
+            bool facingRight = playerController.IsFacingRight();
+            return new Vector3(facingRight ? 1 : -1, 0.2f, 0).normalized;
+        }
+
+        float scaleDirection = Mathf.Sign(transform.localScale.x);
+        if (Mathf.Abs(scaleDirection) > 0.1f)
+            return new Vector3(scaleDirection, 0.2f, 0).normalized;
+
+        return new Vector3(1, 0.2f, 0).normalized;
     }
 
     Vector3 GetClosestPointOnLine(Vector3 lineStart, Vector3 lineEnd, Vector3 point)
@@ -416,7 +397,7 @@ public class PlayerCombat : MonoBehaviour
         GetAttackPoints(out Vector3 startPoint, out Vector3 endPoint, settings);
 
         float progress = (float)index / ghostSwordCount;
-        Vector3 currentEndPoint = Vector3.Lerp(startPoint, endPoint, 0.3f + progress * 0.7f);
+        Vector3 currentEndPoint = Vector3.Lerp(startPoint, endPoint, 0.4f + progress * 0.6f);
 
         GameObject ghostObj = new GameObject($"GhostSword_{index}");
         ghostObj.transform.SetParent(transform);
@@ -426,10 +407,10 @@ public class PlayerCombat : MonoBehaviour
         ghostLine.SetPosition(0, startPoint);
         ghostLine.SetPosition(1, currentEndPoint);
 
-        ghostLine.startWidth = 0.1f;
-        ghostLine.endWidth = 0.02f;
+        ghostLine.startWidth = 0.15f * (1f - progress * 0.5f);
+        ghostLine.endWidth = 0.01f;
 
-        float alpha = ghostSwordColor.a * (1 - progress * 0.7f);
+        float alpha = ghostSwordColor.a * (1 - progress * 0.5f);
         Color fadedColor = new Color(ghostSwordColor.r, ghostSwordColor.g, ghostSwordColor.b, alpha);
         ghostLine.startColor = fadedColor;
         ghostLine.endColor = new Color(fadedColor.r, fadedColor.g, fadedColor.b, 0);
@@ -444,6 +425,7 @@ public class PlayerCombat : MonoBehaviour
     {
         float startTime = Time.time;
         Color startColor = line.startColor;
+        float initialStartWidth = line.startWidth;
 
         while (Time.time - startTime < ghostSwordLifetime)
         {
@@ -451,26 +433,9 @@ public class PlayerCombat : MonoBehaviour
             Color newColor = startColor;
             newColor.a = Mathf.Lerp(startColor.a, 0, t);
             line.startColor = newColor;
+            line.startWidth = Mathf.Lerp(initialStartWidth, 0f, t);
             yield return null;
         }
-    }
-
-    Vector3 GetAttackDirection()
-    {
-        float mouseX = Input.GetAxis("Mouse X");
-
-        if (Mathf.Abs(mouseX) > 0.1f)
-        {
-            return new Vector3(Mathf.Sign(mouseX), 0.2f, 0).normalized;
-        }
-
-        float horizontal = Input.GetAxisRaw("Horizontal");
-        if (horizontal != 0)
-        {
-            return new Vector3(horizontal, 0.2f, 0).normalized;
-        }
-
-        return new Vector3(1, 0.2f, 0).normalized;
     }
 
     void PlayAttackSound()
@@ -487,9 +452,10 @@ public class PlayerCombat : MonoBehaviour
 
     void ResetCombo()
     {
-        Debug.Log("Combo reset!");
         currentComboStep = 0;
         pendingNextAttack = false;
         isAttacking = false;
+
+        if (swordModel != null) swordModel.SetActive(false);
     }
 }
