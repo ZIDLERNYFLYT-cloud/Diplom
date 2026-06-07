@@ -575,6 +575,13 @@ public class PlayerSideController : MonoBehaviour
 
         isDashing = true;
 
+        // --- НОВОЕ: ОТКЛЮЧАЕМ СТОЛКНОВЕНИЯ С ВРАГАМИ ---
+        // Вычисляем индекс слоя врагов из твоей LayerMask (предполагается, что выбран один слой)
+        int enemyLayerIndex = Mathf.RoundToInt(Mathf.Log(enemyLayer.value, 2));
+        // Отключаем физику между слоем игрока и слоем врага
+        Physics.IgnoreLayerCollision(gameObject.layer, enemyLayerIndex, true);
+        // -----------------------------------------------
+
         if (charMaterial) charMaterial.color = sprintColor;
         audioSource.pitch = 1.0f + Random.Range(-pitchRange, pitchRange);
         audioSource.PlayOneShot(DashSound, volume);
@@ -603,6 +610,10 @@ public class PlayerSideController : MonoBehaviour
                 rb.useGravity = true;
                 isDashing = false;
                 physicsEnded = true;
+
+                // --- НОВОЕ: ВКЛЮЧАЕМ СТОЛКНОВЕНИЯ ОБРАТНО ---
+                Physics.IgnoreLayerCollision(gameObject.layer, enemyLayerIndex, false);
+                // --------------------------------------------
             }
 
             elapsed += Time.deltaTime;
@@ -612,6 +623,12 @@ public class PlayerSideController : MonoBehaviour
         characterModel.localPosition = staticModelPos;
 
         if (charMaterial) charMaterial.color = originalColor;
+
+        // Подстраховка: если цикл прервется раньше времени, обязательно возвращаем коллизии
+        if (!physicsEnded)
+        {
+            Physics.IgnoreLayerCollision(gameObject.layer, enemyLayerIndex, false);
+        }
 
         rb.useGravity = true;
         isDashing = false;

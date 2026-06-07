@@ -1,141 +1,144 @@
-using UnityEngine;
+п»їusing UnityEngine;
 using UnityEngine.Video;
 using System.Collections;
 
 public class GameFinale : MonoBehaviour
 {
-    [Header("Персонаж")]
+    [Header("РџРµСЂСЃРѕРЅР°Р¶")]
     [SerializeField] private Animator playerAnimator;
-    [SerializeField] private string kneelingAnimName = "Kneeling"; // анимация вставания на колени
-    [SerializeField] private string kneelingIdleAnimName = "KneelingIdle"; // idle анимация стоя на коленях
+    [SerializeField, Tooltip("РРјСЏ С‚СЂРёРіРіРµСЂР° РІ Animator Controller")]
+    private string kneelTriggerName = "StartKneel";
 
-    [Header("Объекты для активации")]
-    [SerializeField] private GameObject targetObject; // объект, скрипт которого нужно запустить
-    [SerializeField] private GameObject objectToActivate; // объект, который включится в конце
+    [SerializeField, Tooltip("Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Р°РЅРёРјР°С†РёРё РІСЃС‚Р°РІР°РЅРёСЏ РЅР° РєРѕР»РµРЅРё (РІ СЃРµРєСѓРЅРґР°С…)")]
+    private float kneelAnimationDuration = 2.5f;
 
-    [Header("Видео и аудио")]
+    [Header("Р¦РµР»РµРІРѕР№ РѕР±СЉРµРєС‚")]
+    [SerializeField] private GameObject targetObject;
+
+    [Header("РЎРєСЂРёРїС‚С‹")]
+    [SerializeField] private MonoBehaviour[] scriptsToDisable;
+    [SerializeField] private MonoBehaviour[] scriptsToEnable;
+
+    [Header("Р¤РёРЅР°Р»СЊРЅС‹Р№ РѕР±СЉРµРєС‚")]
+    [SerializeField] private GameObject objectToActivate;
+
+    [Header("РћР±СЉРµРєС‚С‹ РґР»СЏ РѕС‚РєР»СЋС‡РµРЅРёСЏ")]
+    [SerializeField] private GameObject[] objectsToDisable;
+
+    [Header("Р’РёРґРµРѕ Рё Р°СѓРґРёРѕ")]
     [SerializeField] private VideoPlayer videoPlayer;
     [SerializeField] private AudioSource audioSource1;
     [SerializeField] private AudioSource audioSource2;
 
-    [Header("Настройки")]
+    [Header("РќР°СЃС‚СЂРѕР№РєРё")]
     [SerializeField] private string playerTag = "Player";
 
-    [Header("Таймеры (паузы ПЕРЕД каждым действием)")]
-    [SerializeField, Tooltip("Пауза после анимации перед запуском targetObject")]
-    private float delayBeforeTargetObject = 0.5f;
-
-    [SerializeField, Tooltip("Пауза после targetObject перед включением видео")]
-    private float delayBeforeVideo = 0.5f;
-
-    [SerializeField, Tooltip("Пауза после окончания видео перед первым аудио")]
-    private float delayBeforeAudio1 = 0f;
-
-    [SerializeField, Tooltip("Пауза после первого аудио перед вторым")]
-    private float delayBeforeAudio2 = 0f;
-
-    [SerializeField, Tooltip("Пауза после второго аудио перед последним объектом")]
-    private float delayBeforeFinalObject = 0f;
+    [Header("РџР°СѓР·С‹")]
+    [SerializeField] private float delayBeforeTargetObject = 0.5f;
+    [SerializeField] private float delayBeforeVideo = 0.5f;
+    [SerializeField] private float delayBeforeAudio1 = 0f;
+    [SerializeField] private float delayBeforeAudio2 = 0f;
+    [SerializeField] private float delayBeforeFinalObject = 0f;
 
     private bool isFinaleStarted = false;
 
     private void OnTriggerEnter(Collider other)
     {
-        if (!isFinaleStarted && other.CompareTag(playerTag))
+        if (isFinaleStarted || !other.CompareTag(playerTag))
+            return;
+
+        isFinaleStarted = true;
+
+        // РџРѕР»СѓС‡Р°РµРј РєРѕРјРїРѕРЅРµРЅС‚С‹
+        PlayerSideController playerController = other.GetComponent<PlayerSideController>();
+        Rigidbody rb = other.GetComponent<Rigidbody>();
+
+        // РћС‚РєР»СЋС‡Р°РµРј СѓРїСЂР°РІР»РµРЅРёРµ РёРіСЂРѕРєРѕРј
+        if (playerController != null)
+            playerController.enabled = false;
+
+        // РџРѕР»РЅР°СЏ РѕСЃС‚Р°РЅРѕРІРєР° С„РёР·РёРєРё
+        if (rb != null)
         {
-            isFinaleStarted = true;
-            StartCoroutine(StartFinaleSequence());
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
         }
+
+        StartCoroutine(StartFinaleSequence(other.transform));
     }
 
-    private IEnumerator StartFinaleSequence()
+    private IEnumerator StartFinaleSequence(Transform playerTransform)
     {
-        // 1. Запускаем анимацию вставания на колени (в обратном порядке)
-        playerAnimator.speed = -1f; // проигрывание наоборот
-        playerAnimator.Play(kneelingAnimName, 0, 1f); // начинаем с конца
-
-        // Ждем окончания обратной анимации
-        yield return new WaitForSeconds(GetAnimationLength(kneelingAnimName));
-
-        // 2. Останавливаем обратную анимацию и запускаем зацикленный idle
-        playerAnimator.speed = 1f; // сбрасываем скорость
-        playerAnimator.Play(kneelingIdleAnimName, 0, 0f);
-        playerAnimator.SetBool(kneelingIdleAnimName, true);
-
-        // --- ТАЙМЕР 1 ---
-        yield return new WaitForSeconds(delayBeforeTargetObject);
-
-        // 3. Запускаем скрипт с целевого объекта
-        if (targetObject != null)
+        // 1. РћС‚РєР»СЋС‡Р°РµРј Р»РёС€РЅРёРµ РѕР±СЉРµРєС‚С‹
+        foreach (GameObject obj in objectsToDisable)
         {
-            targetObject.SetActive(true);
-            // Если нужно вызвать конкретный метод:
-            var scripts = targetObject.GetComponents<MonoBehaviour>();
-            foreach (var script in scripts)
-            {
-                script.Invoke("StartScript", 0f); // или любой другой метод
-            }
+            if (obj != null) obj.SetActive(false);
         }
 
-        // --- ТАЙМЕР 2 ---
+        // 2. Р—Р°РїСѓСЃРєР°РµРј Р°РЅРёРјР°С†РёСЋ (СЃР°РјР°СЏ С‡Р°СЃС‚Р°СЏ РїСЂРёС‡РёРЅР° РїСЂРѕР±Р»РµРј вЂ” РёСЃРїСЂР°РІР»РµРЅРѕ)
+        if (playerAnimator != null)
+        {
+            // РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ РїРµСЂРµРІРѕРґРёРј РІ Idle РїРµСЂРµРґ С‚СЂРёРіРіРµСЂРѕРј (РѕС‡РµРЅСЊ РїРѕРјРѕРіР°РµС‚)
+            playerAnimator.ResetTrigger(kneelTriggerName);
+            playerAnimator.Play("Idle", 0, 0f);           // в†ђ Р’Р°Р¶РЅРѕ!
+
+            yield return null; // Р”Р°С‘Рј РѕРґРёРЅ РєР°РґСЂ РЅР° РїРµСЂРµС…РѕРґ РІ Idle
+
+            playerAnimator.SetTrigger(kneelTriggerName);
+            Debug.Log("РўСЂРёРіРіРµСЂ Р°РЅРёРјР°С†РёРё Р·Р°РїСѓС‰РµРЅ: " + kneelTriggerName);
+        }
+        else
+        {
+            Debug.LogError("PlayerAnimator РЅРµ РЅР°Р·РЅР°С‡РµРЅ РІ GameFinale!");
+        }
+
+        // Р–РґС‘Рј Р·Р°РІРµСЂС€РµРЅРёСЏ Р°РЅРёРјР°С†РёРё
+        yield return new WaitForSeconds(kneelAnimationDuration);
+
+        yield return new WaitForSeconds(delayBeforeTargetObject);
+
+        // 3. РђРєС‚РёРІР°С†РёСЏ/РґРµР°РєС‚РёРІР°С†РёСЏ РѕР±СЉРµРєС‚РѕРІ Рё СЃРєСЂРёРїС‚РѕРІ
+        if (targetObject != null)
+            targetObject.SetActive(true);
+
+        foreach (MonoBehaviour script in scriptsToDisable)
+            if (script != null) script.enabled = false;
+
+        foreach (MonoBehaviour script in scriptsToEnable)
+            if (script != null) script.enabled = true;
+
         yield return new WaitForSeconds(delayBeforeVideo);
 
-        // 4. Включаем видео
+        // 4. Р’РёРґРµРѕ
         if (videoPlayer != null)
         {
             videoPlayer.Play();
-            // Ждем окончания видео
             yield return new WaitWhile(() => videoPlayer.isPlaying);
         }
 
-        // --- ТАЙМЕР 3 ---
         yield return new WaitForSeconds(delayBeforeAudio1);
 
-        // 5. Воспроизводим первое аудио и ждем его окончания
+        // 5. РђСѓРґРёРѕ 1
         if (audioSource1 != null && audioSource1.clip != null)
         {
             audioSource1.Play();
             yield return new WaitWhile(() => audioSource1.isPlaying);
         }
 
-        // --- ТАЙМЕР 4 ---
         yield return new WaitForSeconds(delayBeforeAudio2);
 
-        // 6. Воспроизводим второе аудио и ждем его окончания
+        // 6. РђСѓРґРёРѕ 2
         if (audioSource2 != null && audioSource2.clip != null)
         {
             audioSource2.Play();
             yield return new WaitWhile(() => audioSource2.isPlaying);
         }
 
-        // --- ТАЙМЕР 5 ---
         yield return new WaitForSeconds(delayBeforeFinalObject);
 
-        // 7. Включаем последний объект
+        // 7. Р¤РёРЅР°Р»СЊРЅС‹Р№ РѕР±СЉРµРєС‚
         if (objectToActivate != null)
-        {
             objectToActivate.SetActive(true);
-        }
-    }
-
-    // Вспомогательный метод для получения длины анимации
-    private float GetAnimationLength(string animName)
-    {
-        if (playerAnimator == null) return 1f;
-
-        RuntimeAnimatorController ac = playerAnimator.runtimeAnimatorController;
-        if (ac == null) return 1f;
-
-        AnimationClip[] clips = ac.animationClips;
-        foreach (AnimationClip clip in clips)
-        {
-            if (clip.name == animName)
-            {
-                return clip.length;
-            }
-        }
-
-        Debug.LogWarning($"Анимация '{animName}' не найдена!");
-        return 1f;
     }
 }
