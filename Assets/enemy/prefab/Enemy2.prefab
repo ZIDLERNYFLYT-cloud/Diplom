@@ -147,11 +147,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: db0eb7839dae1cb4588e9b8ae0b06143, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxHealth: 100
+  maxHealth: 70
   animator: {fileID: 0}
   audioSource: {fileID: 0}
   hitSound: {fileID: 0}
   deathSound: {fileID: 0}
+  sinkSpeed: 0.3
+  sinkDelay: 3
+  destroyAfterSink: 1
+  destroyDepth: -5
 --- !u!136 &9009030318329724247
 CapsuleCollider:
   m_ObjectHideFlags: 0

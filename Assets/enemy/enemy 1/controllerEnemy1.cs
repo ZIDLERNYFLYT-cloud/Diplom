@@ -1,4 +1,4 @@
-using UnityEngine;
+п»їusing UnityEngine;
 using UnityEngine.AI;
 using System.Collections;
 
@@ -7,20 +7,20 @@ public class EnemyAI : MonoBehaviour
     public enum State { Idle, Patrol, Chase, Attack }
     public State currentState = State.Idle;
 
-    [Header("Настройки движения")]
+    [Header("РќР°СЃС‚СЂРѕР№РєРё РґРІРёР¶РµРЅРёСЏ")]
     public float walkSpeed = 2f;
     public float chaseSpeed = 4f;
     public float patrolRadius = 5f;
     public float stopDistance = 1.5f;
     public float detectionRange = 7f;
 
-    [Header("Ссылки")]
+    [Header("РЎСЃС‹Р»РєРё")]
     public Transform player;
     public Animator anim;
     public AudioSource audioSource;
     public AudioClip screamSound;
 
-    [Header("Настройки атаки")]
+    [Header("РќР°СЃС‚СЂРѕР№РєРё Р°С‚Р°РєРё")]
     public Transform attackPoint;
     public float attackRange = 0.5f;
     public LayerMask playerLayer;
@@ -31,57 +31,26 @@ public class EnemyAI : MonoBehaviour
     private bool hasScreamed = false;
     private float stateTimer;
 
-    private HealthEnemy health; // Ссылка на компонент здоровья
+    private HealthEnemy health; // РЎСЃС‹Р»РєР° РЅР° РєРѕРјРїРѕРЅРµРЅС‚ Р·РґРѕСЂРѕРІСЊСЏ
     private bool isDead = false;
 
     void Start()
     {
-        // Получаем компонент здоровья
         health = GetComponent<HealthEnemy>();
         if (health == null)
         {
-            Debug.LogError("HealthEnemy компонент не найден на " + gameObject.name);
+            Debug.LogError("HealthEnemy РєРѕРјРїРѕРЅРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ РЅР° " + gameObject.name);
             return;
         }
-
-        // Подписываемся на события смерти
-        health.OnDeath += HandleDeath;
 
         startPosition = transform.position;
         SetNewPatrolTarget();
         player = GameObject.FindGameObjectWithTag("Player").transform;
     }
 
-    void OnDestroy()
-    {
-        // Отписываемся от событий
-        if (health != null)
-            health.OnDeath -= HandleDeath;
-    }
-
-    void HandleDeath()
-    {
-        isDead = true;
-
-        // Отключаем физику, чтобы тело не мешало игроку
-        if (GetComponent<Collider>())
-            GetComponent<Collider>().enabled = false;
-        if (GetComponent<Rigidbody>())
-            GetComponent<Rigidbody>().isKinematic = true;
-
-        // Анимация смерти
-        if (anim != null)
-        {
-            int randomDeath = Random.Range(1, 3);
-            anim.SetTrigger("die");
-        }
-
-        // Удаляем объект через 5 секунд
-        Destroy(gameObject, 5f);
-    }
-
     void Update()
     {
+        // Р•СЃР»Рё РјС‘СЂС‚РІ РёР»Рё СЃРєСЂРёРїС‚ РѕС‚РєР»СЋС‡РµРЅ (HealthEnemy РѕС‚РєР»СЋС‡РёС‚ РµРіРѕ РїСЂРё СЃРјРµСЂС‚Рё) вЂ” РЅРёС‡РµРіРѕ РЅРµ РґРµР»Р°РµРј
         if (isDead || health == null || health.IsDead()) return;
 
         float distanceToPlayer = Mathf.Abs(transform.position.x - player.position.x);
@@ -96,14 +65,11 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
-    // Публичный метод для получения урона (прокси для HealthEnemy)
     public void TakeDamage(int damageAmount)
     {
         if (health != null && !health.IsDead())
         {
             health.TakeDamage(damageAmount);
-
-            // Если враг получил урон и был в состоянии Idle или Patrol - переходим в погоню
             if (!health.IsDead() && (currentState == State.Idle || currentState == State.Patrol))
             {
                 TransitionToChase();
@@ -123,11 +89,8 @@ public class EnemyAI : MonoBehaviour
     {
         if (anim != null) anim.SetBool("isWalking", true);
 
-        // Пускаем луч вперед на небольшое расстояние
         Vector3 direction = (patrolTarget.x > transform.position.x) ? Vector3.right : Vector3.left;
         RaycastHit hit;
-
-        // Проверяем, нет ли стены впереди
         if (Physics.Raycast(transform.position + Vector3.up, direction, out hit, 0.7f))
         {
             StopAndPickNewTarget();
@@ -207,15 +170,25 @@ public class EnemyAI : MonoBehaviour
         Gizmos.DrawWireSphere(attackPoint.position, attackRange);
     }
 
+    // Р­С‚РѕС‚ РјРµС‚РѕРґ РІС‹Р·С‹РІР°РµС‚СЃСЏ РёР· Р°РЅРёРјР°С†РёРё Р°С‚Р°РєРё
     public void EnemyAttackHit()
     {
-        if (attackPoint == null || isDead || (health != null && health.IsDead())) return;
+        if (isDead || (health != null && health.IsDead())) return;
+        if (attackPoint == null) return;
 
         Collider[] hitPlayers = Physics.OverlapSphere(attackPoint.position, attackRange, playerLayer);
         foreach (Collider playerObj in hitPlayers)
         {
-            PlayerHealth health = playerObj.GetComponent<PlayerHealth>();
-            if (health != null) health.TakeDamage(damage);
+            PlayerHealth healthPlayer = playerObj.GetComponent<PlayerHealth>();
+            if (healthPlayer != null) healthPlayer.TakeDamage(damage);
         }
+    }
+
+    // РњРµС‚РѕРґ, РєРѕС‚РѕСЂС‹Р№ РІС‹Р·РѕРІРµС‚ HealthEnemy РїРµСЂРµРґ СЃРјРµСЂС‚СЊСЋ (РµСЃР»Рё РЅСѓР¶РЅРѕ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РѕС‚РєР»СЋС‡РёС‚СЊ С‡С‚РѕвЂ‘С‚Рѕ)
+    public void DisableBeforeDeath()
+    {
+        isDead = true;
+        // РњРѕР¶РЅРѕ РѕСЃС‚Р°РЅРѕРІРёС‚СЊ Р°РЅРёРјР°С†РёСЋ РґРІРёР¶РµРЅРёСЏ
+        if (anim != null) anim.SetBool("isWalking", false);
     }
 }

@@ -29,7 +29,7 @@ public class EnemyAI3D : MonoBehaviour
     private Rigidbody rb;
     private HealthEnemy health;
 
-    private enum EnemyState { Idle, Patrol, Chase, Attack, Rage, Hit }
+    private enum EnemyState { Idle, Patrol, Chase, Attack, Hit }
     private EnemyState currentState = EnemyState.Idle;
 
     private bool isFacingRight = true;
@@ -52,6 +52,7 @@ public class EnemyAI3D : MonoBehaviour
         if (health == null)
         {
             Debug.LogError("HealthEnemy компонент не найден на " + gameObject.name);
+            enabled = false;
             return;
         }
 
@@ -67,56 +68,17 @@ public class EnemyAI3D : MonoBehaviour
         if (playerObj != null)
             player = playerObj.transform;
 
-        health.OnDeath += HandleDeath;
-
         if (!health.IsDead() && stateMachineCoroutine == null)
         {
             stateMachineCoroutine = StartCoroutine(StateMachineRoutine());
         }
     }
 
-    void OnDestroy()
-    {
-        if (health != null)
-            health.OnDeath -= HandleDeath;
-    }
-
-    void HandleDeath()
-    {
-        Debug.Log("EnemyAI3D: HandleDeath вызван!");
-
-        if (stateMachineCoroutine != null)
-        {
-            StopCoroutine(stateMachineCoroutine);
-            stateMachineCoroutine = null;
-        }
-
-        StopAllCoroutines();
-        isPerformingAction = true;
-        canAttack = false;
-
-        if (rb != null)
-        {
-            rb.velocity = Vector3.zero;
-            rb.isKinematic = true;
-        }
-
-        Collider col = GetComponent<Collider>();
-        if (col != null)
-            col.enabled = false;
-
-        if (anim != null)
-        {
-            anim.speed = originalAnimationSpeed;
-            ResetAllVelocityAnims();
-        }
-
-        Destroy(gameObject, 3f);
-    }
-
     void Update()
     {
-        if (health == null || health.IsDead() || isPerformingAction) return;
+        // Если враг мёртв – ничего не делаем (скрипт будет отключён HealthEnemy, но на всякий случай проверяем)
+        if (health == null || health.IsDead()) return;
+        if (isPerformingAction) return;
 
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, targetRotationY, 0), Time.deltaTime * flipSpeed);
 
@@ -224,13 +186,13 @@ public class EnemyAI3D : MonoBehaviour
         float idleTime = Random.Range(2f, 4f);
         float timer = 0;
 
-        while (timer < idleTime && currentState == EnemyState.Idle && !isPerformingAction)
+        while (timer < idleTime && currentState == EnemyState.Idle && !isPerformingAction && !health.IsDead())
         {
             timer += Time.deltaTime;
             yield return null;
         }
 
-        if (currentState == EnemyState.Idle && !isPerformingAction)
+        if (!health.IsDead() && currentState == EnemyState.Idle && !isPerformingAction)
         {
             SwitchState(EnemyState.Patrol);
         }
@@ -246,13 +208,13 @@ public class EnemyAI3D : MonoBehaviour
         float patrolTime = Random.Range(3f, 5f);
         float timer = 0;
 
-        while (timer < patrolTime && currentState == EnemyState.Patrol && !isPerformingAction)
+        while (timer < patrolTime && currentState == EnemyState.Patrol && !isPerformingAction && !health.IsDead())
         {
             timer += Time.deltaTime;
             yield return null;
         }
 
-        if (currentState == EnemyState.Patrol && !isPerformingAction)
+        if (!health.IsDead() && currentState == EnemyState.Patrol && !isPerformingAction)
         {
             Flip();
             SwitchState(EnemyState.Idle);

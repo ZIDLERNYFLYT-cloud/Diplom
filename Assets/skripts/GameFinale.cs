@@ -85,7 +85,7 @@ public class GameFinale : MonoBehaviour
 
             yield return null; // Даём один кадр на переход в Idle
 
-            playerAnimator.SetTrigger(kneelTriggerName);
+            //playerAnimator.SetTrigger(kneelTriggerName);
             Debug.Log("Триггер анимации запущен: " + kneelTriggerName);
         }
         else

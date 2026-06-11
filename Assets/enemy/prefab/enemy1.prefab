@@ -285,6 +285,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxHealth: 100
+  animator: {fileID: 0}
+  audioSource: {fileID: 0}
+  hitSound: {fileID: 0}
+  deathSound: {fileID: 0}
+  sinkSpeed: 0.34
+  sinkDelay: 3.12
+  destroyAfterSink: 1
+  destroyDepth: -3.03
 --- !u!1001 &82862204399664105
 PrefabInstance:
   m_ObjectHideFlags: 0

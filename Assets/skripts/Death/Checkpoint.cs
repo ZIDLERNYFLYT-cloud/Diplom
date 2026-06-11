@@ -1,28 +1,31 @@
-using UnityEngine;
+п»їusing UnityEngine;
 
 public class Checkpoint : MonoBehaviour
 {
-    [Header("Настройки чекпоинта")]
+    [Header("РќР°СЃС‚СЂРѕР№РєРё С‡РµРєРїРѕРёРЅС‚Р°")]
     public int checkpointID = 0;
     public bool isActive = false;
 
-    [Header("Визуальные эффекты")]
+    [Header("РќР°СЃС‚СЂРѕР№РєРё СЃРїР°РІРЅР°")]
+    public float spawnHeightOffset = 0f; // РЎРјРµС‰РµРЅРёРµ РїРѕ Y РѕС‚ РїРѕР·РёС†РёРё С‡РµРєРїРѕРёРЅС‚Р°
+
+    [Header("Р’РёР·СѓР°Р»СЊРЅС‹Рµ СЌС„С„РµРєС‚С‹")]
     public GameObject checkpointEffect;
     public Light checkpointLight;
 
-    [Header("Аудио")]
+    [Header("РђСѓРґРёРѕ")]
     public AudioClip checkpointSound;
     [Range(0, 2)] public float soundVolume = 1f;
-    public float soundMaxDistance = 30f; // Максимальная дистанция слышимости
-    public float soundMinDistance = 1f;  // Минимальная дистанция (громкость 100%)
+    public float soundMaxDistance = 30f;
+    public float soundMinDistance = 1f;
 
-    [Header("Цвета индикации")]
+    [Header("Р¦РІРµС‚Р° РёРЅРґРёРєР°С†РёРё")]
     public Color inactiveColor = Color.gray;
     public Color activeColor = Color.green;
 
     private Renderer checkpointRenderer;
     private bool isTriggered = false;
-    private AudioSource audioSource; // Добавляем свой AudioSource
+    private AudioSource audioSource;
 
     void Start()
     {
@@ -33,10 +36,9 @@ public class Checkpoint : MonoBehaviour
 
     void SetupAudioSource()
     {
-        // Создаем отдельный AudioSource для чекпоинта
         audioSource = gameObject.AddComponent<AudioSource>();
         audioSource.playOnAwake = false;
-        audioSource.spatialBlend = 1f; // Полностью 3D звук
+        audioSource.spatialBlend = 1f;
         audioSource.rolloffMode = AudioRolloffMode.Linear;
         audioSource.maxDistance = soundMaxDistance;
         audioSource.minDistance = soundMinDistance;
@@ -61,17 +63,18 @@ public class Checkpoint : MonoBehaviour
         RespawnSystem respawnSystem = FindObjectOfType<RespawnSystem>();
         if (respawnSystem != null)
         {
-            respawnSystem.SetRespawnPoint(transform.position, checkpointID);
+            // Р’С‹С‡РёСЃР»СЏРµРј РїРѕР·РёС†РёСЋ СЃРїР°РІРЅР° СЃ СѓС‡С‘С‚РѕРј СЃРјРµС‰РµРЅРёСЏ РїРѕ Y
+            Vector3 spawnPoint = transform.position;
+            spawnPoint.y += spawnHeightOffset;
+            respawnSystem.SetRespawnPoint(spawnPoint, checkpointID);
         }
 
-        // ПРОИГРЫВАЕМ ЗВУК через AudioSource
         if (checkpointSound != null && audioSource != null)
         {
             audioSource.PlayOneShot(checkpointSound, soundVolume);
         }
         else if (checkpointSound != null)
         {
-            // Запасной вариант с увеличенной громкостью
             AudioSource.PlayClipAtPoint(checkpointSound, transform.position, soundVolume * 2f);
         }
         else
@@ -87,7 +90,8 @@ public class Checkpoint : MonoBehaviour
         UpdateVisualState();
         DeactivatePreviousCheckpoints();
 
-        Debug.Log($"Checkpoint {checkpointID} activated at position: {transform.position}");
+        // Р”Р»СЏ РѕС‚Р»Р°РґРєРё РІС‹РІРѕРґРёРј РёС‚РѕРіРѕРІСѓСЋ РїРѕР·РёС†РёСЋ СЃРїР°РІРЅР°
+        Debug.Log($"Checkpoint {checkpointID} activated. Spawn position: {transform.position + Vector3.up * spawnHeightOffset}");
     }
 
     void UpdateVisualState()
@@ -119,10 +123,16 @@ public class Checkpoint : MonoBehaviour
 
     void OnDrawGizmos()
     {
+        // РћС‚РѕР±СЂР°Р¶Р°РµРј Р·РѕРЅСѓ С‚СЂРёРіРіРµСЂР° С‡РµРєРїРѕРёРЅС‚Р°
         Gizmos.color = isTriggered ? Color.green : Color.gray;
         Gizmos.DrawWireCube(transform.position, GetComponent<BoxCollider>()?.bounds.size ?? Vector3.one);
 
-        // Визуализируем зону слышимости
+        // Р’РёР·СѓР°Р»РёР·РёСЂСѓРµРј С‚РѕС‡РєСѓ СЃРїР°РІРЅР° (СЃ СѓС‡С‘С‚РѕРј СЃРјРµС‰РµРЅРёСЏ) Р¶С‘Р»С‚С‹Рј РєСѓР±РѕРј
+        Vector3 spawnPos = transform.position + Vector3.up * spawnHeightOffset;
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireCube(spawnPos, Vector3.one * 0.5f);
+
+        // Р—РѕРЅС‹ СЃР»С‹С€РёРјРѕСЃС‚Рё
         if (Application.isPlaying && audioSource != null)
         {
             Gizmos.color = Color.yellow;
